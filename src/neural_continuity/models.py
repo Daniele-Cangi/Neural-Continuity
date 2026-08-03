@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -43,24 +44,75 @@ class ToyEmbeddingModel:
 class SentenceTransformerModel:
     def __init__(self, model_id: str, device: str = "cpu", cache_only: bool = True):
         self.model_id = model_id
+        self.device = device
+        self.cache_only = cache_only
+        self.model_path: str | None = None
+        self.model_files: list[str] = []
+
         try:
             from sentence_transformers import SentenceTransformer
         except ModuleNotFoundError as exc:
             raise RuntimeError("sentence-transformers is not installed") from exc
         import torch
 
-        self.model_id = model_id
         self.device = (
             device if device != "auto" else ("cuda" if torch.cuda.is_available() else "cpu")
         )
-        self.cache_only = cache_only
         kwargs: dict[str, Any] = {"device": self.device}
         try:
-            self._model = SentenceTransformer(model_id, **kwargs)
+            self._model = SentenceTransformer(model_id, local_files_only=cache_only, **kwargs)
         except Exception as exc:
+            if cache_only:
+                raise RuntimeError(
+                    f"sentence-transformer model '{model_id}' not loadable from local cache: {exc}"
+                ) from exc
             raise RuntimeError(
                 f"sentence-transformer model '{model_id}' not loadable: {exc}"
             ) from exc
+
+        self.model_path = self._infer_model_path()
+        self.model_files = self._collect_model_files()
+
+    def _infer_model_path(self) -> str | None:
+        try:
+            path = str(self._model._model_path)
+            if path and os.path.isdir(path):
+                return path
+        except Exception:
+            pass
+        if os.path.isdir(self.model_id):
+            return str(os.path.abspath(self.model_id))
+        return None
+
+    def _collect_model_files(self) -> list[str]:
+        if not self.model_path:
+            return []
+        collected: list[str] = []
+        for root, _, filenames in os.walk(self.model_path):
+            for filename in sorted(filenames):
+                lower = filename.lower()
+                if lower.endswith((".bin", ".safetensors", ".json", ".txt", ".model", ".pt")):
+                    collected.append(os.path.relpath(os.path.join(root, filename), self.model_path))
+        return collected[:80]
+
+    def manifest(self) -> dict[str, Any]:
+        file_hashes: list[dict[str, str]] = []
+        if self.model_path:
+            for name in self.model_files:
+                full_path = os.path.join(self.model_path, name)
+                hasher = hashlib.sha256()
+                with open(full_path, "rb") as handle:
+                    for chunk in iter(lambda: handle.read(8192), b""):
+                        hasher.update(chunk)
+                file_hashes.append({"path": name, "sha256": hasher.hexdigest()[:16]})
+
+        return {
+            "path": self.model_path,
+            "cache_only": self.cache_only,
+            "files": file_hashes,
+            "model_id": self.model_id,
+            "device": self.device,
+        }
 
     def encode(self, texts: Sequence[str], batch_size: int = 32) -> np.ndarray:
         return self._model.encode(

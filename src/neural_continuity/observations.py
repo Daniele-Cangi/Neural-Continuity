@@ -4,7 +4,7 @@ import os
 import platform
 import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -181,6 +181,62 @@ def observation_to_rows(observation: ModelObservation) -> list[dict[str, Any]]:
                 }
             )
     return rows
+
+
+def observation_to_manifest(observation: ModelObservation) -> dict[str, Any]:
+    return {
+        "run_id": observation.run_id,
+        "run_label": observation.run_label,
+        "batch_size": observation.batch_size,
+        "model_id": observation.model_id,
+        "model_manifest": observation.model_manifest,
+        "query_results": {
+            query_id: {
+                "query_id": row.query_id,
+                "ranked_documents": row.ranked_documents,
+                "score_by_document": row.score_by_document,
+            }
+            for query_id, row in observation.query_results.items()
+        },
+        "query_embeddings": observation.query_embeddings,
+        "document_embeddings": observation.document_embeddings,
+        "query_latencies_ms": observation.query_latencies_ms,
+        "system_metrics": observation.system_metrics,
+    }
+
+
+def observation_from_manifest(payload: Mapping[str, Any]) -> ModelObservation:
+    queries = {
+        query_id: QueryObservation(
+            query_id=query_id,
+            ranked_documents=list(data["ranked_documents"]),
+            score_by_document={
+                doc_id: float(score) for doc_id, score in data["score_by_document"].items()
+            },
+        )
+        for query_id, data in payload.get("query_results", {}).items()
+    }
+    return ModelObservation(
+        run_id=str(payload["run_id"]),
+        run_label=str(payload["run_label"]),
+        batch_size=int(payload["batch_size"]),
+        model_id=str(payload["model_id"]),
+        model_manifest=dict(payload.get("model_manifest", {})),
+        query_results=queries,
+        query_embeddings={
+            query_id: list(vector)
+            for query_id, vector in payload.get("query_embeddings", {}).items()
+        },
+        document_embeddings={
+            query_id: {doc_id: list(vector) for doc_id, vector in doc_map.items()}
+            for query_id, doc_map in payload.get("document_embeddings", {}).items()
+        },
+        query_latencies_ms={
+            query_id: float(value)
+            for query_id, value in payload.get("query_latencies_ms", {}).items()
+        },
+        system_metrics=dict(payload.get("system_metrics", {})),
+    )
 
 
 def save_raw_observations_parquet(
