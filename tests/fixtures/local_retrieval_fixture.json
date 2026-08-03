@@ -1,0 +1,142 @@
+{
+  "fixture_id": "nc-m0-local-smoke-v1",
+  "name": "Neural Continuity M0 local retrieval fixture",
+  "description": "Small deterministic fixture with multiple domains and distractors.",
+  "queries": [
+    {
+      "query_id": "q_astro_01",
+      "query": "How is visible light produced by stars?",
+      "candidate_documents": [
+        {
+          "document_id": "astro_d1",
+          "text": "Stars emit visible light as nuclear reactions convert hydrogen into helium."
+        },
+        {
+          "document_id": "astro_d2",
+          "text": "Planetary atmospheres can block parts of a star's emitted spectrum."
+        },
+        {
+          "document_id": "astro_d3",
+          "text": "Tidal forces can reshape a planet’s orbit over decades."
+        },
+        {
+          "document_id": "astro_d4",
+          "text": "A comet tail is made from volatile ices and dust."
+        },
+        {
+          "document_id": "astro_d5",
+          "text": "Nuclear fusion in stellar cores releases photons across the electromagnetic spectrum."
+        }
+      ],
+      "relevant_document_ids": ["astro_d1", "astro_d5"]
+    },
+    {
+      "query_id": "q_quant_01",
+      "query": "What is a deterministic finite automaton?",
+      "candidate_documents": [
+        {
+          "document_id": "quant_d1",
+          "text": "A DFA has discrete states and a transition function for each symbol."
+        },
+        {
+          "document_id": "quant_d2",
+          "text": "Quantum entanglement violates deterministic transitions."
+        },
+        {
+          "document_id": "quant_d3",
+          "text": "A compiler can emit bytecode for deterministic execution."
+        },
+        {
+          "document_id": "quant_d4",
+          "text": "A scheduler can preempt threads on fixed time slices."
+        },
+        {
+          "document_id": "quant_d5",
+          "text": "Finite-state machines are mathematical models used in parsing."
+        }
+      ],
+      "relevant_document_ids": ["quant_d1", "quant_d5"]
+    },
+    {
+      "query_id": "q_health_01",
+      "query": "What causes protein denaturation at high temperature?",
+      "candidate_documents": [
+        {
+          "document_id": "health_d1",
+          "text": "Heat breaks hydrogen bonds and other structural interactions in proteins."
+        },
+        {
+          "document_id": "health_d2",
+          "text": "Protein denaturation is unaffected by pH changes."
+        },
+        {
+          "document_id": "health_d3",
+          "text": "Adenine and thymine pair in DNA through hydrogen bonds."
+        },
+        {
+          "document_id": "health_d4",
+          "text": "Vitamin C is needed for healthy cartilage and immunity."
+        },
+        {
+          "document_id": "health_d5",
+          "text": "Water content and hydrophobic forces stabilize protein structure."
+        }
+      ],
+      "relevant_document_ids": ["health_d1", "health_d5"]
+    },
+    {
+      "query_id": "q_history_01",
+      "query": "Who led the Apollo 11 mission?",
+      "candidate_documents": [
+        {
+          "document_id": "hist_d1",
+          "text": "Apollo 11 landed on the Moon in 1969 with Armstrong and Aldrin."
+        },
+        {
+          "document_id": "hist_d2",
+          "text": "Apollo 13 was first mission that successfully landed on the Moon."
+        },
+        {
+          "document_id": "hist_d3",
+          "text": "The Cold War accelerated semiconductor miniaturization."
+        },
+        {
+          "document_id": "hist_d4",
+          "text": "Apollo 11 command module was called Columbia."
+        },
+        {
+          "document_id": "hist_d5",
+          "text": "Apollo 11 is remembered for first humans on the lunar surface."
+        }
+      ],
+      "relevant_document_ids": ["hist_d1", "hist_d5", "hist_d4"]
+    },
+    {
+      "query_id": "q_food_01",
+      "query": "Why is salt preservation possible in fish processing?",
+      "candidate_documents": [
+        {
+          "document_id": "food_d1",
+          "text": "High salt lowers water activity and inhibits microbial growth."
+        },
+        {
+          "document_id": "food_d2",
+          "text": "Salt increases enzymatic browning by denaturing proteins."
+        },
+        {
+          "document_id": "food_d3",
+          "text": "Freezing proteins is the only reason salt preserves food."
+        },
+        {
+          "document_id": "food_d4",
+          "text": "Salt crystals alter osmotic pressure for many foods."
+        },
+        {
+          "document_id": "food_d5",
+          "text": "Curing combines salt and low moisture to extend shelf life."
+        }
+      ],
+      "relevant_document_ids": ["food_d1", "food_d5", "food_d4"]
+    }
+  ]
+}

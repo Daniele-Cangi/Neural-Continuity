@@ -1,0 +1,17 @@
+{
+  "version": "1.0.0",
+  "contract_id": "m0-measurement-integrity-v1",
+  "required_top_level_fields": [
+    "experiment_name",
+    "contract",
+    "model",
+    "dataset",
+    "null",
+    "controls"
+  ],
+  "required_model_fields": ["kind"],
+  "required_dataset_fields": ["path"],
+  "required_null_fields": ["repeats", "batch_sizes", "bootstrap_samples", "confidence_level"],
+  "required_controls": ["exact_repeat", "negative", "boundary"],
+  "description": "Contract for M0 continuity experiments."
+}

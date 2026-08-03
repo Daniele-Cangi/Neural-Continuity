@@ -1,0 +1,32 @@
+experiment_name: M0_MEASUREMENT_INTEGRITY
+contract: ../contracts/m0-measurement-integrity-v1.json
+model:
+  kind: toy
+  dimension: 32
+  seed: 1729
+dataset:
+  path: ../tests/fixtures/local_retrieval_fixture.json
+'null':
+  repeats: 3
+  batch_sizes:
+    - 1
+    - 4
+  bootstrap_samples: 500
+  confidence_level: 0.99
+  random_seed: 2026
+runtime:
+  topology_k: 5
+controls:
+  exact_repeat:
+    enabled: true
+    repeats: 1
+  negative:
+    enabled: true
+    type: gaussian_noise
+    strength: 0.95
+    seed: 777
+  boundary:
+    enabled: true
+    type: gaussian_noise
+    strength: 0.06
+    seed: 901
