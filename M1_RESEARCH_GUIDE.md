@@ -136,10 +136,16 @@ Per ogni transizione valutare (entro il contratto dichiarato):
    - stato control + fail-closed.
 7. Rilasciare solo con risultati coerenti con gli invariants M0 e senza promesse oltre scope.
 
-## 11) Stato branch (contesto operativo)
+## 11) Stato repository e contesto operativo
 
-- Repo: `C:\dev\neural-continuity`
-- Branch attuale: `codex/m1-verified-quantization`
-- Basata sul commit M0 verificato `3418b7d612adfd2bd81045dd4843cf5904192b5f`
-- Head: oltre `3418b7d612adfd2bd81045dd4843cf5904192b5f` (branch M1)
-- M0 non deve essere fuso in `main` fino a revisione esplicita.
+- Repo locale: `C:\dev\neural-continuity`
+- M0 è stato integrato in `main` tramite PR #1.
+- Merge commit M0 + pianificazione iniziale M1:
+  `3617d5e9d402c886e70b868cfa03af59229e84f0`
+- Branch originaria di pianificazione M1:
+  `codex/m1-verified-quantization`
+- Branch correttiva documentale:
+  `codex/m1-plan-freeze-fix`
+- Base M0 verificata:
+  `3418b7d612adfd2bd81045dd4843cf5904192b5f`
+- Nessuna implementazione M1 è ancora iniziata.
