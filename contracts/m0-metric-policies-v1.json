@@ -1,0 +1,86 @@
+{
+  "version": "1.0.0",
+  "metric_policies": [
+    {
+      "metric_id": "recall_at_1",
+      "family": "functional",
+      "orientation": "higher_is_better",
+      "may_block_promotion": true,
+      "minimum_null_observations": 2,
+      "minimum_candidate_sample_size": 2,
+      "comparison_method": "query_bootstrap"
+    },
+    {
+      "metric_id": "recall_at_5",
+      "family": "functional",
+      "orientation": "higher_is_better",
+      "may_block_promotion": true,
+      "minimum_null_observations": 2,
+      "minimum_candidate_sample_size": 2,
+      "comparison_method": "query_bootstrap"
+    },
+    {
+      "metric_id": "mean_reciprocal_rank",
+      "family": "functional",
+      "orientation": "higher_is_better",
+      "may_block_promotion": true,
+      "minimum_null_observations": 2,
+      "minimum_candidate_sample_size": 2,
+      "comparison_method": "query_bootstrap"
+    },
+    {
+      "metric_id": "paired_cosine_drift",
+      "family": "topology",
+      "orientation": "lower_is_better",
+      "may_block_promotion": true,
+      "minimum_null_observations": 2,
+      "minimum_candidate_sample_size": 2,
+      "comparison_method": "query_bootstrap"
+    },
+    {
+      "metric_id": "nearest_neighbour_overlap_at_k",
+      "family": "topology",
+      "orientation": "higher_is_better",
+      "may_block_promotion": true,
+      "minimum_null_observations": 2,
+      "minimum_candidate_sample_size": 2,
+      "comparison_method": "query_bootstrap"
+    },
+    {
+      "metric_id": "rank_correlation",
+      "family": "topology",
+      "orientation": "higher_is_better",
+      "may_block_promotion": true,
+      "minimum_null_observations": 2,
+      "minimum_candidate_sample_size": 2,
+      "comparison_method": "query_bootstrap"
+    },
+    {
+      "metric_id": "latency_p50_ms",
+      "family": "system",
+      "orientation": "lower_is_better",
+      "may_block_promotion": false,
+      "minimum_null_observations": 2,
+      "minimum_candidate_sample_size": 1,
+      "comparison_method": "query_bootstrap"
+    },
+    {
+      "metric_id": "latency_p95_ms",
+      "family": "system",
+      "orientation": "lower_is_better",
+      "may_block_promotion": false,
+      "minimum_null_observations": 2,
+      "minimum_candidate_sample_size": 1,
+      "comparison_method": "query_bootstrap"
+    },
+    {
+      "metric_id": "throughput_queries_per_sec",
+      "family": "system",
+      "orientation": "higher_is_better",
+      "may_block_promotion": false,
+      "minimum_null_observations": 2,
+      "minimum_candidate_sample_size": 1,
+      "comparison_method": "query_bootstrap"
+    }
+  ]
+}

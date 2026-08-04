@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import dataclasses
-from collections.abc import Iterable
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
 from . import FAIL, INCONCLUSIVE, PASS
+from .metrics import POLICY_BY_ID, MetricPolicy
 
 
 @dataclass(frozen=True)
@@ -25,90 +25,314 @@ class ContinuityDecision:
     def as_dict(self) -> dict[str, Any]:
         return {
             "status": self.status,
-            "reasons": [dataclasses.asdict(reason) for reason in self.reasons],
+            "reasons": [
+                {
+                    "category": reason.category,
+                    "metric": reason.metric,
+                    "message": reason.message,
+                    "affected_sample_ids": reason.affected_sample_ids,
+                    "details": reason.details,
+                }
+                for reason in self.reasons
+            ],
         }
+
+
+def _policy_lookup(
+    required_metrics: list[str],
+    metric_policies: list[MetricPolicy] | None,
+) -> dict[str, MetricPolicy]:
+    if metric_policies is None:
+        return {name: POLICY_BY_ID[name] for name in required_metrics if name in POLICY_BY_ID}
+    return {
+        policy.metric_id: policy
+        for policy in metric_policies
+        if policy.metric_id in required_metrics or not required_metrics
+    }
+
+
+def _interval_decision(
+    *,
+    policy: MetricPolicy,
+    envelope_lower: float,
+    envelope_upper: float,
+    observed_lower: float | None,
+    observed_upper: float | None,
+) -> tuple[str | None, dict[str, Any]]:
+    if observed_lower is None or observed_upper is None:
+        return "insufficient_candidate_evidence", {"status": "insufficient"}
+    if math.isnan(envelope_lower) or math.isnan(envelope_upper):
+        return "insufficient_candidate_evidence", {"status": "insufficient"}
+
+    if policy.orientation == "higher_is_better":
+        if observed_upper < envelope_lower:
+            return (
+                "metric_outside_authorized_region",
+                {"direction": "lower_worse", "hard": policy.may_block_promotion},
+            )
+        if observed_lower < envelope_lower < observed_upper:
+            return (
+                "metric_interval_overlaps_authorized_boundary",
+                {"direction": "boundary", "hard": policy.may_block_promotion},
+            )
+        return None, {}
+
+    if policy.orientation == "lower_is_better":
+        if observed_lower > envelope_upper:
+            return (
+                "metric_outside_authorized_region",
+                {"direction": "higher_worse", "hard": policy.may_block_promotion},
+            )
+        if observed_lower < envelope_upper < observed_upper:
+            return (
+                "metric_interval_overlaps_authorized_boundary",
+                {"direction": "boundary", "hard": policy.may_block_promotion},
+            )
+        return None, {}
+
+    if policy.orientation == "two_sided_stability":
+        if observed_upper < envelope_lower or observed_lower > envelope_upper:
+            return (
+                "metric_outside_authorized_region",
+                {"direction": "outside", "hard": policy.may_block_promotion},
+            )
+        if (observed_lower < envelope_lower < observed_upper) or (
+            observed_lower < envelope_upper < observed_upper
+        ):
+            return (
+                "metric_interval_overlaps_authorized_boundary",
+                {"direction": "boundary", "hard": policy.may_block_promotion},
+            )
+        return None, {}
+
+    # informational_only
+    return None, {}
 
 
 def evaluate_comparison(
     comparison: dict[str, Any],
     envelopes: dict[str, dict[str, Any]],
     *,
-    required_metrics: Iterable[str],
-    require_boundary_inconclusive: bool = False,
+    required_metrics: list[str],
+    metric_policies: list[MetricPolicy] | None = None,
 ) -> ContinuityDecision:
-    metric_deltas = comparison.get("metric_deltas", {})
+    required = list(dict.fromkeys(required_metrics))
     reasons: list[DecisionReason] = []
 
-    missing = [metric for metric in required_metrics if metric not in metric_deltas]
-    if missing:
-        reasons.append(
-            DecisionReason(
-                category="missing_evidence",
-                metric=",".join(missing),
-                message="Missing required metric values for this comparison.",
-                affected_sample_ids=[],
-                details={"missing_metrics": missing},
-            )
-        )
-
-    sample_count = int(comparison.get("sample_count", 0))
-    if sample_count < 2:
-        reasons.append(
-            DecisionReason(
-                category="insufficient_sample",
-                metric="sample_count",
-                message="Sample count is below the required threshold for robust evidence.",
-                details={"observed": sample_count},
-            )
-        )
+    metric_deltas = comparison.get("metric_deltas", {})
+    uncertainty = comparison.get("metric_uncertainty", {})
+    policies = _policy_lookup(required, metric_policies)
 
     for regression in comparison.get("regressions", {}).get("source_correct_candidate_wrong", []):
         reasons.append(
             DecisionReason(
                 category="frozen_set_regression",
                 metric="source_correct_candidate_wrong",
-                message=("Primary regression detected: source correct / candidate wrong."),
-                affected_sample_ids=[regression],
+                message="Primary regression detected: source correct / candidate wrong.",
+                affected_sample_ids=[str(regression)],
             )
         )
-
-    for metric, delta in metric_deltas.items():
-        envelope = envelopes.get(metric)
-        if not envelope:
-            continue
-        upper = float(envelope["upper_bound"])
-        if delta > upper:
-            reasons.append(
-                DecisionReason(
-                    category="envelope_exceeded",
-                    metric=metric,
-                    message=f"delta {delta:.6f} exceeded null envelope upper {upper:.6f}",
-                    affected_sample_ids=comparison.get("affected_samples", {}).get(
-                        "source_correct_candidate_wrong", []
-                    ),
-                    details={"delta": delta, "upper": upper},
-                )
-            )
-
-    if reasons:
-        if any(
-            r.category in {"missing_evidence", "insufficient_sample", "boundary_overlap"}
-            for r in reasons
-        ):
-            return ContinuityDecision(status=INCONCLUSIVE, reasons=reasons)
+    if any(r.category == "frozen_set_regression" for r in reasons):
         return ContinuityDecision(status=FAIL, reasons=reasons)
 
-    if require_boundary_inconclusive:
+    missing = [metric for metric in required if metric not in metric_deltas]
+    if missing:
         reasons.append(
             DecisionReason(
-                category="boundary_overlap",
-                metric="boundary_case",
-                message="Explicit synthetic boundary control is treated as inconclusive.",
+                category="missing_evidence",
+                metric=",".join(missing),
+                message="Missing required metric values for this comparison.",
+                details={"missing_metrics": missing},
             )
         )
+
+    for metric in required:
+        policy = policies.get(metric)
+        if policy is None:
+            reasons.append(
+                DecisionReason(
+                    category="missing_metric_policy",
+                    metric=metric,
+                    message="No policy configured for required metric.",
+                    details={"metric": metric},
+                )
+            )
+            continue
+
+        envelope = envelopes.get(metric)
+        if not envelope:
+            reasons.append(
+                DecisionReason(
+                    category="missing_null_envelope",
+                    metric=metric,
+                    message="No null envelope available for this metric.",
+                    details={"metric": metric},
+                )
+            )
+            continue
+
+        if envelope.get("status") != "complete":
+            reasons.append(
+                DecisionReason(
+                    category="insufficient_null_evidence",
+                    metric=metric,
+                    message="Null evidence is insufficient for this metric.",
+                    details={
+                        "status": envelope.get("status"),
+                        "sample_count": envelope.get("sample_count"),
+                    },
+                )
+            )
+            continue
+
+        metric_uncertainty = uncertainty.get(metric)
+        if not metric_uncertainty:
+            reasons.append(
+                DecisionReason(
+                    category="missing_evidence",
+                    metric=metric,
+                    message="Missing metric uncertainty for this comparison.",
+                    details={"metric": metric},
+                )
+            )
+            continue
+
+        candidate_interval = (
+            metric_uncertainty.get("lower_bound"),
+            metric_uncertainty.get("upper_bound"),
+        )
+        source_intervals = envelope.get("source_envelopes")
+        checked_source = False
+        has_complete_source = False
+        has_incomplete_source = False
+
+        if isinstance(source_intervals, dict) and source_intervals:
+            for source_name, source_envelope in source_intervals.items():
+                if not isinstance(source_envelope, dict):
+                    continue
+                checked_source = True
+                if source_envelope.get("status") != "complete":
+                    has_incomplete_source = True
+                    continue
+                has_complete_source = True
+                category, detail = _interval_decision(
+                    policy=policy,
+                    envelope_lower=float(source_envelope.get("lower_bound", math.nan)),
+                    envelope_upper=float(source_envelope.get("upper_bound", math.nan)),
+                    observed_lower=candidate_interval[0],
+                    observed_upper=candidate_interval[1],
+                )
+                if category is not None:
+                    reasons.append(
+                        DecisionReason(
+                            category=category,
+                            metric=metric,
+                            message=(
+                                "metric interval "
+                                f"[{candidate_interval[0]}, "
+                                f"{candidate_interval[1]}] "
+                                "is not fully inside source-specific null interval "
+                                f"[{source_envelope.get('lower_bound')}, "
+                                f"{source_envelope.get('upper_bound')}] "
+                                f"({source_name})."
+                            ),
+                            details={
+                                "noise_source": source_name,
+                                "null_interval": [
+                                    source_envelope.get("lower_bound"),
+                                    source_envelope.get("upper_bound"),
+                                ],
+                                "candidate_interval": [
+                                    candidate_interval[0],
+                                    candidate_interval[1],
+                                ],
+                                "interval_detail": detail,
+                                "policy": {
+                                    "metric_id": metric,
+                                    "may_block_promotion": policy.may_block_promotion,
+                                    "minimum_candidate_sample_size": (
+                                        policy.minimum_candidate_sample_size
+                                    ),
+                                    "minimum_null_observations": policy.minimum_null_observations,
+                                },
+                            },
+                        )
+                    )
+
+            if checked_source:
+                if has_incomplete_source:
+                    reasons.append(
+                        DecisionReason(
+                            category="insufficient_null_evidence",
+                            metric=metric,
+                            message=(
+                                "Some noise sources are missing complete null envelopes "
+                                "for this metric."
+                            ),
+                            details={
+                                "noise_source_counts": envelope.get("noise_source_counts"),
+                                "source_bounds": envelope.get("details", {}).get(
+                                    "source_bounds", {}
+                                ),
+                            },
+                        )
+                    )
+                if has_complete_source or has_incomplete_source:
+                    continue
+
+        category, detail = _interval_decision(
+            policy=policy,
+            envelope_lower=float(envelope.get("lower_bound", math.nan)),
+            envelope_upper=float(envelope.get("upper_bound", math.nan)),
+            observed_lower=candidate_interval[0],
+            observed_upper=candidate_interval[1],
+        )
+        if category is None:
+            continue
+
+        reasons.append(
+            DecisionReason(
+                category=category,
+                metric=metric,
+                message=(
+                    "metric interval "
+                    f"[{candidate_interval[0]}, "
+                    f"{candidate_interval[1]}] "
+                    f"is not fully inside null interval "
+                    f"[{envelope.get('lower_bound')}, {envelope.get('upper_bound')}]."
+                ),
+                details={
+                    "null_interval": [envelope.get("lower_bound"), envelope.get("upper_bound")],
+                    "candidate_interval": [candidate_interval[0], candidate_interval[1]],
+                    "interval_detail": detail,
+                    "policy": {
+                        "metric_id": metric,
+                        "may_block_promotion": policy.may_block_promotion,
+                        "minimum_candidate_sample_size": policy.minimum_candidate_sample_size,
+                        "minimum_null_observations": policy.minimum_null_observations,
+                    },
+                },
+            )
+        )
+
+    if any(r.category in {"missing_evidence", "insufficient_candidate_evidence"} for r in reasons):
+        return ContinuityDecision(status=INCONCLUSIVE, reasons=reasons)
+    if any(r.category in {"insufficient_null_evidence", "missing_null_envelope"} for r in reasons):
         return ContinuityDecision(status=INCONCLUSIVE, reasons=reasons)
 
-    if reasons:
+    hard_outside = any(
+        r.category == "metric_outside_authorized_region"
+        and bool(r.details.get("interval_detail", {}).get("hard", False))
+        for r in reasons
+    )
+    hard_boundary_overlap = any(
+        r.category == "metric_interval_overlaps_authorized_boundary"
+        and bool(r.details.get("interval_detail", {}).get("hard", False))
+        for r in reasons
+    )
+    if hard_boundary_overlap:
+        return ContinuityDecision(status=INCONCLUSIVE, reasons=reasons)
+    if hard_outside:
         return ContinuityDecision(status=FAIL, reasons=reasons)
 
-    return ContinuityDecision(status=PASS, reasons=[])
+    return ContinuityDecision(status=PASS, reasons=reasons)

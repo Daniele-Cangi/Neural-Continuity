@@ -9,8 +9,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from .observations import ModelObservation, observation_to_manifest
 
-def canonical_json_bytes(payload: Mapping[str, Any]) -> bytes:
+
+def canonical_json_bytes(payload: Mapping[str, Any] | list[Any]) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
         "utf-8"
     )
@@ -101,3 +103,25 @@ def write_artifacts(run_dir: Path, artifacts: Mapping[str, Any]) -> dict[str, An
         "artifact-manifest-path": str(manifest_path),
         "artifact-manifest": manifest_payload,
     }
+
+
+def save_replay_bundle(
+    path: Path,
+    observations: list[ModelObservation],
+    *,
+    dataset_identity: Mapping[str, Any],
+    config: Mapping[str, Any],
+) -> str:
+    payload = {
+        "format_version": "1.0.0",
+        "dataset": dict(dataset_identity),
+        "observations": [observation_to_manifest(observation) for observation in observations],
+        "experiment": dict(config),
+        "reproducibility": {
+            "purpose": "Recompute all metric decisions from evidence artifacts",
+            "seedable_fields": ["model_manifest", "query_embeddings", "system_metrics"],
+        },
+    }
+    out = path / "replay-bundle.json"
+    out.write_text(json.dumps(payload, sort_keys=True, indent=2), encoding="utf-8")
+    return str(out)
