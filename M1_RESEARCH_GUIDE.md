@@ -20,7 +20,7 @@ La milestone M0 (`codex/m0-statistical-authority`) è l’hardware di fiducia de
 
 - Controlli implementati e validati:
   - `exact_repeat`
-  - `negative`
+  - `negative` (alias testuale di `material-negative` nella documentazione M0)
   - `boundary`
 - Decisione aggregate: `measurement_integrity_status = PASS`.
 - Replay verificato: riesecuzione ricostruita senza rerun del modello e match su:
