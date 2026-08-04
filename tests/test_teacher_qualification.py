@@ -68,7 +68,7 @@ def _make_fake_sentence_transformers_model(monkeypatch, *, model_path: Path, out
             self.model_id = model_id
             self.tokenizer = FakeTokenizer()
             self.auto_model = types.SimpleNamespace(
-                config=types.SimpleNamespace(_commit_hash="stub-revision")
+                config=types.SimpleNamespace(_commit_hash="a" * 40)
             )
 
         def eval(self):
@@ -85,6 +85,7 @@ def _make_fake_sentence_transformers_model(monkeypatch, *, model_path: Path, out
     module = types.ModuleType("sentence_transformers")
     module.SentenceTransformer = FakeSentenceTransformer
     monkeypatch.setitem(sys.modules, "sentence_transformers", module)
+    monkeypatch.setattr(models, "_package_available", lambda name: True)
     return init_calls, encode_calls, FakeSentenceTransformer
 
 
@@ -106,7 +107,7 @@ def _write_teacher_config(tmp_path: Path) -> Path:
         },
         "dataset": {"path": "local_retrieval_fixture.json"},
         "null": {
-            "repeats": 1,
+            "repeats": 2,
             "batch_sizes": [1],
             "bootstrap_samples": 25,
             "confidence_level": 0.99,
@@ -162,6 +163,7 @@ def _install_fake_sentence_transformers(monkeypatch, *, constructor_behaviour) -
     module = types.ModuleType("sentence_transformers")
     module.SentenceTransformer = FakeSentenceTransformer
     monkeypatch.setitem(sys.modules, "sentence_transformers", module)
+    monkeypatch.setattr(models, "_package_available", lambda name: True)
 
 
 def _classify_teacher_dependency_error(monkeypatch, reason: str, *, extra_setup=None) -> None:
@@ -175,7 +177,9 @@ def _classify_teacher_dependency_error(monkeypatch, reason: str, *, extra_setup=
     monkeypatch.setattr(cli_module, "SentenceTransformerModel", _constructor)
 
 
-def _run_blocking_cli(monkeypatch, tmp_path: Path, *, reason: str) -> tuple[dict[str, object], str]:
+def _run_blocking_cli(
+    monkeypatch, tmp_path: Path, *, reason: str
+) -> tuple[int, dict[str, object], str]:
     config_path = _write_teacher_config(tmp_path)
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     config["model"]["allow_offline_skip"] = True
@@ -192,10 +196,9 @@ def _run_blocking_cli(monkeypatch, tmp_path: Path, *, reason: str) -> tuple[dict
         exit_code = cli_module.main(
             ["m0-run", "--config", str(config_path), "--output", str(tmp_path / "runs")]
         )
-    assert exit_code == 0
     payload_text = output.getvalue().strip()
     assert payload_text, "expected blocked decision payload on stdout"
-    return json.loads(payload_text), payload_text
+    return exit_code, json.loads(payload_text), payload_text
 
 
 def test_sentence_transformer_dependency_classification_missing_sentence_transformers(
@@ -272,22 +275,25 @@ def test_sentence_transformer_dependency_classification_runtime_import_error(
 
 
 @pytest.mark.parametrize(
-    "reason",
+    ("reason", "execution_status", "exit_code"),
     [
-        "teacher_dependency_unavailable:sentence-transformers",
-        "teacher_dependency_unavailable:torch",
-        "teacher_not_available_from_local_cache: missing",
-        "teacher_runtime_import_error: boom",
+        ("teacher_dependency_unavailable:sentence-transformers", "BLOCKED", 3),
+        ("teacher_dependency_unavailable:torch", "BLOCKED", 3),
+        ("teacher_not_available_from_local_cache: missing", "BLOCKED", 3),
+        ("teacher_runtime_import_error: boom", "EXECUTION_ERROR", 2),
     ],
 )
-def test_blocked_teacher_paths_remain_inconclusive_in_cli(
-    monkeypatch, tmp_path: Path, reason: str
+def test_teacher_failures_remain_outside_scientific_decisions(
+    monkeypatch, tmp_path: Path, reason: str, execution_status: str, exit_code: int
 ) -> None:
-    payload, _ = _run_blocking_cli(monkeypatch, tmp_path, reason=reason)
-    assert payload["status"] == "INCONCLUSIVE"
+    actual_exit_code, payload, _ = _run_blocking_cli(monkeypatch, tmp_path, reason=reason)
+    assert actual_exit_code == exit_code
+    assert payload["status"] == execution_status
+    assert payload["execution_status"] == execution_status
     assert payload["reason"] == reason
     assert payload["real_teacher_executed"] is False
-    assert payload["measurement_integrity_status"] == "INCONCLUSIVE"
+    assert payload["measurement_integrity_status"] is None
+    assert payload["scientific_decision"] is None
 
 
 def test_sentence_transformer_manifest_records_explicit_controls_and_cache(
@@ -324,6 +330,7 @@ def test_sentence_transformer_manifest_records_explicit_controls_and_cache(
     assert manifest["output_dtype"] == "float32"
     assert manifest["max_sequence_length"] == 42
     assert manifest["evaluation_mode"] is True
+    assert model._model.max_seq_length == 42
 
 
 def test_sentence_transformer_manifest_has_full_inventory_and_deterministic_order(
@@ -352,6 +359,42 @@ def test_sentence_transformer_manifest_has_full_inventory_and_deterministic_orde
     assert file_order == sorted(file_order)
     assert one["model_files"] == two["model_files"]
     assert one["hashed_file_count"] == 90
+    assert one["snapshot_content_sha256"] == two["snapshot_content_sha256"]
+
+
+def test_sentence_transformer_rejects_non_fp32_output_contract(monkeypatch, tmp_path: Path) -> None:
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "model.bin").write_text("x", encoding="utf-8")
+    _install_fake_torch(monkeypatch)
+    _make_fake_sentence_transformers_model(
+        monkeypatch,
+        model_path=snapshot,
+        output_factory=lambda texts, kwargs: np.ones((len(texts), 4), dtype=np.float32),
+    )
+    with pytest.raises(ValueError, match="requires output_dtype=float32"):
+        SentenceTransformerModel("sentence-transformers/all-MiniLM-L6-v2", output_dtype="float64")
+
+
+def test_sentence_transformer_fails_closed_on_snapshot_hash_error(
+    monkeypatch, tmp_path: Path
+) -> None:
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "model.bin").write_text("x", encoding="utf-8")
+    _install_fake_torch(monkeypatch)
+    _make_fake_sentence_transformers_model(
+        monkeypatch,
+        model_path=snapshot,
+        output_factory=lambda texts, kwargs: np.ones((len(texts), 4), dtype=np.float32),
+    )
+
+    def _fail_hash(_path: str):
+        raise OSError("unreadable")
+
+    monkeypatch.setattr(models, "_hash_file", _fail_hash)
+    with pytest.raises(RuntimeError, match="teacher_provenance_hash_error:model.bin"):
+        SentenceTransformerModel("sentence-transformers/all-MiniLM-L6-v2")
 
 
 def test_sentence_transformer_file_mutation_changes_manifest_hash(

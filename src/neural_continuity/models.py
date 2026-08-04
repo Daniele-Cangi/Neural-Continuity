@@ -104,7 +104,7 @@ def _candidate_paths_from_object(obj: Any) -> list[str]:
     if backend is not None and hasattr(backend, "tokenizer"):
         names.extend(_candidate_paths_from_object(backend.tokenizer))
 
-    return [str(v) for v in names if isinstance(v, (str, Path))]
+    return [str(v) for v in names if isinstance(v, str | Path)]
 
 
 def _resolve_revision_from_modules(modules: list[Any]) -> str | None:
@@ -115,12 +115,7 @@ def _resolve_revision_from_modules(modules: list[Any]) -> str | None:
                 continue
             for key in ("_commit_hash", "_name_or_path"):
                 value = getattr(config, key, None)
-                if (
-                    isinstance(value, str)
-                    and value.strip()
-                    and key == "_commit_hash"
-                    and len(value) > 6
-                ):
+                if key == "_commit_hash" and _is_immutable_revision(value):
                     return value
         auto_model = getattr(module, "auto_model", None)
         if auto_model is not None:
@@ -128,12 +123,15 @@ def _resolve_revision_from_modules(modules: list[Any]) -> str | None:
             if auto_config is None:
                 continue
             value = getattr(auto_config, "_commit_hash", None)
-            if isinstance(value, str) and value.strip():
-                return value
-            value = getattr(auto_config, "_name_or_path", None)
-            if isinstance(value, str) and value.strip():
+            if _is_immutable_revision(value):
                 return value
     return None
+
+
+def _is_immutable_revision(value: Any) -> bool:
+    if not isinstance(value, str) or len(value) != 40:
+        return False
+    return all(character in "0123456789abcdefABCDEF" for character in value)
 
 
 def _is_transient_file(name: str) -> bool:
@@ -223,10 +221,17 @@ class SentenceTransformerModel:
         self.prompt_name = prompt_name if prompt_name is not None else None
         self.prompt_text = prompt if prompt is not None else None
         self.requested_max_sequence_length = _safe_int(max_sequence_length)
+        if (
+            self.requested_max_sequence_length is not None
+            and self.requested_max_sequence_length <= 0
+        ):
+            raise ValueError("max_sequence_length must be a positive integer")
+        if self.prompt_name is not None and self.prompt_text is not None:
+            raise ValueError("prompt_name and prompt are mutually exclusive")
 
         normalized_dtype = str(output_dtype).lower()
-        if normalized_dtype not in {"float32", "float64"}:
-            raise ValueError(f"unsupported output dtype: {output_dtype}")
+        if normalized_dtype != "float32":
+            raise ValueError("real teacher qualification requires output_dtype=float32")
         self.output_dtype = normalized_dtype
 
         if not _package_available("sentence-transformers"):
@@ -266,9 +271,11 @@ class SentenceTransformerModel:
         self.model_path_reason: str | None = None
         self.model_path = self._infer_model_path()
         if self.model_path is None:
-            self.model_path_reason = "model path could not be inferred from loaded object"
+            raise RuntimeError("teacher_provenance_unavailable:model path could not be inferred")
 
         self.model_files = self._collect_model_files()
+        if not self.model_files:
+            raise RuntimeError("teacher_provenance_unavailable:model snapshot contains no files")
         self.model_implementation_class = (
             f"{type(self._model).__module__}.{type(self._model).__name__}"
         )
@@ -278,13 +285,25 @@ class SentenceTransformerModel:
         if self.embedding_dimension is None:
             self.embedding_dimension_reason = "embedding dimension not exposed by model instance"
 
+        if self.requested_max_sequence_length is not None:
+            try:
+                self._model.max_seq_length = self.requested_max_sequence_length
+            except Exception as exc:
+                raise RuntimeError(
+                    "teacher_preprocessing_configuration_error:max_sequence_length"
+                ) from exc
+
         self.max_sequence_length = self._resolve_max_sequence_length()
         self.max_sequence_length_reason = (
             None if self.max_sequence_length is not None else "max sequence length not available"
         )
-        if self.requested_max_sequence_length is not None:
-            self.max_sequence_length = self.requested_max_sequence_length
-            self.max_sequence_length_reason = None
+        if (
+            self.requested_max_sequence_length is not None
+            and self.max_sequence_length != self.requested_max_sequence_length
+        ):
+            raise RuntimeError(
+                "teacher_preprocessing_configuration_error:max_sequence_length_not_applied"
+            )
 
         self.tokenizer_class, self.tokenizer_config, self.tokenizer_config_reason = (
             self._resolve_tokenizer()
@@ -298,8 +317,7 @@ class SentenceTransformerModel:
             self._model.eval()
             self.evaluation_mode = True
         except Exception as exc:
-            self.evaluation_mode = False
-            self.model_eval_reason = f"evaluation mode call failed: {exc}"
+            raise RuntimeError("teacher_evaluation_mode_error") from exc
         else:
             self.model_eval_reason = None
 
@@ -353,15 +371,8 @@ class SentenceTransformerModel:
                             "byte_size": file_size,
                         }
                     )
-                except Exception:
-                    manifest.append(
-                        {
-                            "relative_path": relative_path,
-                            "sha256": None,
-                            "byte_size": None,
-                            "hash_error": "failed_to_hash_file",
-                        }
-                    )
+                except Exception as exc:
+                    raise RuntimeError(f"teacher_provenance_hash_error:{relative_path}") from exc
         manifest.sort(key=lambda item: str(item.get("relative_path")))
         return manifest
 
@@ -412,7 +423,7 @@ class SentenceTransformerModel:
         return None
 
     def _resolve_max_sequence_length(self) -> int | None:
-        candidates = []
+        candidates = [getattr(self._model, "max_seq_length", None)]
         tokenizer = getattr(self._model, "tokenizer", None)
         if tokenizer is not None:
             candidates.extend(
@@ -457,11 +468,11 @@ class SentenceTransformerModel:
     def _resolve_revision(self) -> tuple[str | None, str | None]:
         for attr in ("revision", "_revision", "_model_card"):
             value = getattr(self._model, attr, None)
-            if isinstance(value, str) and value.strip():
+            if _is_immutable_revision(value):
                 return value, None
-        for attr in ("_commit_hash", "_name_or_path", "name_or_path"):
+        for attr in ("_commit_hash",):
             value = getattr(getattr(self._model, "auto_model", None), attr, None)
-            if isinstance(value, str) and value.strip():
+            if _is_immutable_revision(value):
                 return value, None
 
         modules = self._iter_sentence_modules()
@@ -470,10 +481,10 @@ class SentenceTransformerModel:
             return commit_hash, None
         if self.model_path and os.path.isdir(self.model_path):
             revision_hint = Path(self.model_path).name
-            if len(revision_hint) >= 8:
+            if _is_immutable_revision(revision_hint):
                 return revision_hint, "inferred from local snapshot directory name"
 
-        return None, "revision identity not exposed"
+        return None, "immutable revision identity not exposed; content hashes are authoritative"
 
     def manifest(self) -> dict[str, Any]:
         file_hashes = list(self.model_files)
@@ -486,10 +497,17 @@ class SentenceTransformerModel:
             "safetensors": _package_version("safetensors"),
         }
         total_bytes = 0
+        content_hasher = hashlib.sha256()
         for entry in file_hashes:
             bytes_value = entry.get("byte_size")
             if isinstance(bytes_value, int):
                 total_bytes += bytes_value
+            content_hasher.update(str(entry["relative_path"]).encode("utf-8"))
+            content_hasher.update(b"\0")
+            content_hasher.update(str(entry["sha256"]).encode("ascii"))
+            content_hasher.update(b"\0")
+            content_hasher.update(str(entry["byte_size"]).encode("ascii"))
+            content_hasher.update(b"\n")
         return {
             "declared_model_id": self.model_id,
             "model_id": self.model_id,
@@ -519,8 +537,10 @@ class SentenceTransformerModel:
             "snapshot_revision_reason": self.model_revision_reason,
             "package_versions": package_versions,
             "model_files": file_hashes,
+            "model_file_count": len(file_hashes),
             "hashed_file_count": len(file_hashes),
             "hashed_file_bytes": total_bytes,
+            "snapshot_content_sha256": content_hasher.hexdigest(),
         }
 
     def _validate_encoding(self, values: np.ndarray, expected_count: int) -> np.ndarray:

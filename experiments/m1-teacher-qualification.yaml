@@ -1,5 +1,10 @@
-experiment_name: M1_REAL_TEACHER_QUALIFICATION
+experiment_name: M1_REAL_TEACHER_OBSERVATION_PREFLIGHT
 contract: ../contracts/m0-measurement-integrity-v1.json
+
+evidence_scope:
+  classification: real_teacher_plumbing_preflight
+  qualifying_m1_evidence: false
+  limitation: five-query fixture validates loading, capture, and replay only
 
 model:
   kind: sentence-transformers
