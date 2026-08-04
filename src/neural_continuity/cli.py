@@ -53,6 +53,13 @@ CONTROL_EXPECTED_STATUS = {
 }
 
 
+def _safe_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 class CommandError(RuntimeError):
     pass
 
@@ -112,10 +119,20 @@ def _build_model(config: dict[str, Any]) -> tuple[Any, dict[str, Any], bool]:
         return toy_model, toy_manifest, False
 
     try:
+        normalize_embeddings = bool(model_cfg.get("normalize_embeddings", False))
+        output_dtype = str(model_cfg.get("output_dtype", "float32"))
+        prompt_name = model_cfg.get("prompt_name")
+        prompt = model_cfg.get("prompt")
+        max_sequence_length = model_cfg.get("max_sequence_length")
         sentence_model = SentenceTransformerModel(
             model_id=str(model_cfg["model_id"]),
             device=str(model_cfg.get("device", "auto")),
             cache_only=bool(model_cfg.get("cache_only", True)),
+            normalize_embeddings=normalize_embeddings,
+            output_dtype=output_dtype,
+            prompt_name=prompt_name if isinstance(prompt_name, str) else None,
+            prompt=prompt if isinstance(prompt, str) else None,
+            max_sequence_length=_safe_int(max_sequence_length),
         )
     except RuntimeError as exc:
         if model_cfg.get("allow_offline_skip", False):
@@ -128,6 +145,13 @@ def _build_model(config: dict[str, Any]) -> tuple[Any, dict[str, Any], bool]:
         "device": str(model_cfg.get("device", "auto")),
         "cache_only": bool(model_cfg.get("cache_only", True)),
         "model_manifest": sentence_model.manifest(),
+        "requested_configuration": {
+            "normalize_embeddings": normalize_embeddings,
+            "output_dtype": output_dtype,
+            "prompt_name": prompt_name if isinstance(prompt_name, str) else None,
+            "prompt": prompt if isinstance(prompt, str) else None,
+            "max_sequence_length": _safe_int(max_sequence_length),
+        },
     }
     return sentence_model, sentence_manifest, True
 

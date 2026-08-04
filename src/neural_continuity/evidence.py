@@ -31,7 +31,20 @@ def sha256_file(path: Path) -> str:
 
 
 def build_environment_manifest() -> dict[str, Any]:
-    deps = ["numpy", "pandas", "pyarrow", "psutil", "torch", "scipy", "PyYAML"]
+    deps = [
+        "numpy",
+        "pandas",
+        "pyarrow",
+        "psutil",
+        "torch",
+        "sentence-transformers",
+        "transformers",
+        "huggingface-hub",
+        "tokenizers",
+        "safetensors",
+        "scipy",
+        "PyYAML",
+    ]
     versions: dict[str, str] = {}
     for dep in deps:
         try:
