@@ -2,7 +2,7 @@
 
 ## 1) Scopo del progetto
 
-Neural Continuity mira a certificare **cambi di modello** in modo ripetibile e verificabile.
+Neural Continuity mira a **misurare e documentare la continuità** di cambi di modello in modo ripetibile e verificabile.
 
 Obiettivo operativo:
 
@@ -12,11 +12,11 @@ Obiettivo operativo:
   - `FAIL`
   - `INCONCLUSIVE`.
 
-La piattaforma non dichiara equivalenza neurale assoluta: dichiara continuità entro i limiti del contratto esplicito.
+La piattaforma non dichiara equivalenza neurale assoluta: dichiara continuità entro i limiti del contratto esplicito e dell’evidenza osservata.
 
 ## 2) Stato attuale: Milestone M0 (conclusa)
 
-La milestone M0 (`codex/m0-statistical-authority`) è l’hardware di fiducia del sistema di misurazione.
+La milestone M0 è l’hardware di fiducia del sistema di misurazione.
 
 - Controlli implementati e validati:
   - `exact_repeat`
@@ -28,8 +28,8 @@ La milestone M0 (`codex/m0-statistical-authority`) è l’hardware di fiducia de
   - outcome dei controlli individuali.
 - Fail-closed: un controllo dichiarato mancante deve fallire in modo deterministico.
 - Artifacts e manifest:
-  - `artifact-manifest.json` con SHA-256 completo
-  - run bundle, decisione, report e metrica serializzati in modo immutabile.
+- `artifact-manifest.json` con hash SHA-256 completo
+- run bundle, decisione, report e metrica serializzati in modo verificabile (tamper-evident) tramite hash canonici.
 
 ## 3) Regole base (invarianti M0 da preservare)
 
@@ -100,7 +100,7 @@ Per ogni transizione valutare (entro il contratto dichiarato):
 - `src/neural_continuity/models.py`
 - `src/neural_continuity/datasets.py`
 - `src/neural_continuity/observations.py`
-- `src/neural_continuity/noise.py`
+- `src/neural_continuity/noise.py` (legacy / non-authoritative: usa `abs(delta)` e non rispecchia direttamente gli invarianti M0 attuali)
 - `src/neural_continuity/metrics.py`
 - `src/neural_continuity/evidence.py`
 - `src/neural_continuity/decisions.py`
@@ -136,9 +136,16 @@ Per ogni transizione valutare (entro il contratto dichiarato):
    - stato control + fail-closed.
 7. Rilasciare solo con risultati coerenti con gli invariants M0 e senza promesse oltre scope.
 
-## 11) Stato branch (contesto operativo)
+## 11) Stato repository e contesto operativo
 
-- Repo: `C:\dev\neural-continuity`
-- Branch attuale: `codex/m0-statistical-authority`
-- Head: `3418b7d612adfd2bd81045dd4843cf5904192b5f`
-- M0 non deve essere fuso in `main` fino a revisione esplicita.
+- Repo locale: `C:\dev\neural-continuity`
+- M0 è stato integrato in `main` tramite PR #1.
+- Merge commit M0 + pianificazione iniziale M1:
+  `3617d5e9d402c886e70b868cfa03af59229e84f0`
+- Branch originaria di pianificazione M1:
+  `codex/m1-verified-quantization`
+- Branch correttiva documentale:
+  `codex/m1-plan-freeze-fix`
+- Base M0 verificata:
+  `3418b7d612adfd2bd81045dd4843cf5904192b5f`
+- Nessuna implementazione M1 è ancora iniziata.
