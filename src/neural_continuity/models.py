@@ -53,8 +53,9 @@ class SentenceTransformerModel:
             from sentence_transformers import SentenceTransformer
         except ModuleNotFoundError as exc:
             raise RuntimeError("sentence-transformers is not installed") from exc
-        import torch
+        import builtins
 
+        torch = builtins.__import__("torch")
         self.device = (
             device if device != "auto" else ("cuda" if torch.cuda.is_available() else "cpu")
         )

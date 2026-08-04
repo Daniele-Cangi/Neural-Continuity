@@ -53,3 +53,7 @@ warn_unused_configs = true
 warn_return_any = false
 warn_unused_ignores = true
 disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = ["torch", "torch.*", "pandas", "psutil", "yaml", "scipy", "scipy.*"]
+ignore_missing_imports = true

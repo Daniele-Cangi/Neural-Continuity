@@ -4,9 +4,10 @@ import json
 import shutil
 from pathlib import Path
 
+import yaml
+
 from neural_continuity.bootstrap import build_envelopes
 from neural_continuity.cli import REQUIRED_METRICS, run_m0, run_m0_replay
-import yaml
 from neural_continuity.datasets import (
     CandidateDocument,
     RetrievalFixture,
@@ -515,13 +516,14 @@ def test_bootstrap_observation_seed_is_used_for_stability():
 
 
 def _write_replay_config(tmp_path: Path) -> Path:
+    repo_root = Path(__file__).resolve().parents[1]
     fixture_name = "local_retrieval_fixture.json"
     fixture_copy = tmp_path / fixture_name
     shutil.copyfile(FIXTURE_PATH, fixture_copy)
 
     config = {
         "experiment_name": "m0-replay-smoke",
-        "contract": "../contracts/m0-measurement-integrity-v1.json",
+        "contract": str(repo_root / "contracts" / "m0-measurement-integrity-v1.json"),
         "model": {
             "kind": "toy",
             "dimension": 16,
@@ -546,10 +548,19 @@ def _write_replay_config(tmp_path: Path) -> Path:
                 "repeats": 1,
             },
             "negative": {
-                "enabled": False,
+                "enabled": True,
+                "type": "dimension_mask",
+                "strength": 0.2,
+                "seed": 11,
             },
             "boundary": {
-                "enabled": False,
+                "enabled": True,
+                "type": "gaussian_noise",
+                "strength": 0.01,
+                "seed": 17,
+                "attempts": 5,
+                "min_strength": 0.0,
+                "max_strength": 0.5,
             },
         },
     }
@@ -574,3 +585,50 @@ def test_m0_replay_recomputes_matching_decision(tmp_path: Path):
     replay = run_m0_replay(replay_bundle_path=replay_path)
     assert replay["status_match"] is True
     assert replay["measurement_integrity_status"] == summary["measurement_integrity_status"]
+    assert replay["control_outcome_match"] is True
+    assert replay["decision"]["control_outcome_match"] is True
+    assert "control_records" in summary
+    assert "control_records" in replay
+    summary_controls = {item.get("control") for item in summary["control_records"]}
+    replay_controls = {item.get("control") for item in replay["control_records"]}
+    assert "exact_repeat" in summary_controls
+    assert "negative" in summary_controls
+    assert "boundary" in summary_controls
+    assert replay_controls == summary_controls
+
+    summary_decisions = {
+        (item["control"], item["run"]): item.get("status")
+        for item in summary["decision"]["control_decisions"]
+    }
+    replay_decisions = {
+        (item["control"], item["run"]): item.get("status")
+        for item in replay["decision"]["control_decisions"]
+    }
+    assert summary_decisions.keys() == replay_decisions.keys()
+    assert summary_decisions == replay_decisions
+
+
+def test_m0_replay_fails_if_declared_control_is_missing(tmp_path: Path):
+    config_path = _write_replay_config(tmp_path)
+    summary = run_m0(config_path=config_path, output_root=tmp_path / "runs")
+
+    replay_path = Path(summary["run_dir"]) / "replay-bundle.json"
+    replay_bundle = json.loads(replay_path.read_text(encoding="utf-8"))
+    replay_bundle["observations"] = [
+        obs for obs in replay_bundle.get("observations", []) if obs.get("run_label") != "negative"
+    ]
+    missing_control_replay_path = Path(summary["run_dir"]) / "replay-bundle-missing-negative.json"
+    missing_control_replay_path.write_text(
+        json.dumps(replay_bundle, indent=2, sort_keys=True), encoding="utf-8"
+    )
+
+    replay = run_m0_replay(replay_bundle_path=missing_control_replay_path)
+    assert replay["status_match"] is False
+    assert replay["control_outcome_match"] is False
+    assert replay["measurement_integrity_status"] == "FAIL"
+    negative_records = [
+        item for item in replay["control_records"] if item.get("control") == "negative"
+    ]
+    assert negative_records
+    assert any(item.get("enabled") for item in negative_records)
+    assert any(item["decision"].get("status") == "MISSING_CONTROL" for item in negative_records)

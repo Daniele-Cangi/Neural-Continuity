@@ -61,7 +61,7 @@
       "orientation": "lower_is_better",
       "may_block_promotion": false,
       "minimum_null_observations": 2,
-      "minimum_candidate_sample_size": 2,
+      "minimum_candidate_sample_size": 1,
       "comparison_method": "query_bootstrap"
     },
     {
@@ -70,7 +70,7 @@
       "orientation": "lower_is_better",
       "may_block_promotion": false,
       "minimum_null_observations": 2,
-      "minimum_candidate_sample_size": 2,
+      "minimum_candidate_sample_size": 1,
       "comparison_method": "query_bootstrap"
     },
     {
@@ -79,7 +79,7 @@
       "orientation": "higher_is_better",
       "may_block_promotion": false,
       "minimum_null_observations": 2,
-      "minimum_candidate_sample_size": 2,
+      "minimum_candidate_sample_size": 1,
       "comparison_method": "query_bootstrap"
     }
   ]

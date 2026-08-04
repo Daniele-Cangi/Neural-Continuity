@@ -13,7 +13,7 @@ import pandas as pd
 import psutil
 
 try:
-    import torch
+    torch: Any = __import__("torch")
 except ModuleNotFoundError:  # pragma: no cover - exercised in environments without torch
 
     class _NoCuda:
@@ -32,7 +32,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised in environments with
     class _NoTorch:
         cuda = _NoCuda()
 
-    torch = _NoTorch()  # type: ignore[assignment]
+    torch = _NoTorch()
 
 from .datasets import RetrievalFixture
 from .models import EmbeddingModel

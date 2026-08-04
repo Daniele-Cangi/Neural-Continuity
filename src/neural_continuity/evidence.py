@@ -12,7 +12,7 @@ from typing import Any
 from .observations import ModelObservation, observation_to_manifest
 
 
-def canonical_json_bytes(payload: Mapping[str, Any]) -> bytes:
+def canonical_json_bytes(payload: Mapping[str, Any] | list[Any]) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
         "utf-8"
     )

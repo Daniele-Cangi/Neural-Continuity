@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import math
+from dataclasses import dataclass, field
 from typing import Any
 
 from . import FAIL, INCONCLUSIVE, PASS
@@ -250,7 +250,9 @@ def evaluate_comparison(
                                 "policy": {
                                     "metric_id": metric,
                                     "may_block_promotion": policy.may_block_promotion,
-                                    "minimum_candidate_sample_size": policy.minimum_candidate_sample_size,
+                                    "minimum_candidate_sample_size": (
+                                        policy.minimum_candidate_sample_size
+                                    ),
                                     "minimum_null_observations": policy.minimum_null_observations,
                                 },
                             },
@@ -264,7 +266,8 @@ def evaluate_comparison(
                             category="insufficient_null_evidence",
                             metric=metric,
                             message=(
-                                "Some noise sources are missing complete null envelopes for this metric."
+                                "Some noise sources are missing complete null envelopes "
+                                "for this metric."
                             ),
                             details={
                                 "noise_source_counts": envelope.get("noise_source_counts"),

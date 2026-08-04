@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 import math
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-import json
-from typing import Any, Literal, Mapping, Sequence
+from typing import Any, Literal
 
 import numpy as np
 from scipy.stats import spearmanr
@@ -95,7 +96,7 @@ METRIC_POLICIES: list[MetricPolicy] = [
         orientation="lower_is_better",
         may_block_promotion=False,
         minimum_null_observations=2,
-        minimum_candidate_sample_size=2,
+        minimum_candidate_sample_size=1,
         comparison_method="query_bootstrap",
     ),
     MetricPolicy(
@@ -104,7 +105,7 @@ METRIC_POLICIES: list[MetricPolicy] = [
         orientation="lower_is_better",
         may_block_promotion=False,
         minimum_null_observations=2,
-        minimum_candidate_sample_size=2,
+        minimum_candidate_sample_size=1,
         comparison_method="query_bootstrap",
     ),
     MetricPolicy(
@@ -113,7 +114,7 @@ METRIC_POLICIES: list[MetricPolicy] = [
         orientation="higher_is_better",
         may_block_promotion=False,
         minimum_null_observations=2,
-        minimum_candidate_sample_size=2,
+        minimum_candidate_sample_size=1,
         comparison_method="query_bootstrap",
     ),
 ]
@@ -197,7 +198,10 @@ def compute_functional_metrics(
     candidate_top_at_1: dict[str, float] = {}
     candidate_top_at_5: dict[str, float] = {}
 
-    regressions = {"source_correct_candidate_wrong": [], "other": []}
+    regressions: dict[str, list[str]] = {
+        "source_correct_candidate_wrong": [],
+        "other": [],
+    }
     top_k_max = max(top_k_values)
 
     for query in fixture.queries:
@@ -245,9 +249,7 @@ def compute_functional_metrics(
                 candidate_recall_hits[k] += 1
 
     query_count = len(fixture.queries)
-    source_recall = {
-        f"recall_at_{k}": source_recall_hits[k] / query_count for k in top_k_values
-    }
+    source_recall = {f"recall_at_{k}": source_recall_hits[k] / query_count for k in top_k_values}
     candidate_recall = {
         f"recall_at_{k}": candidate_recall_hits[k] / query_count for k in top_k_values
     }
@@ -505,7 +507,7 @@ def _metric_delta_and_uncertainty(
             "source_values": source_series,
             "candidate_values": candidate_series,
         },
-        source_series.keys(),
+        list(source_series.keys()),
     )
 
 

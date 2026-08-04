@@ -91,8 +91,7 @@ def build_envelopes(
         raise ValueError("metric_names or metric_policies must be provided")
     if metric_policies is None:
         metric_policies = [
-            {"metric": metric, "minimum_null_observations": 1}
-            for metric in metric_names or []
+            {"metric": metric, "minimum_null_observations": 1} for metric in metric_names or []
         ]
 
     resolved_metrics: dict[str, Mapping[str, Any]] = {}
