@@ -45,7 +45,7 @@ Tabelle previste:
 | Sentence Transformers | mancante (`ModuleNotFoundError` dipendente da torch) | missing |
 | CPU arch | `AMD64` | available |
 | Execution providers | `AzureExecutionProvider`, `CPUExecutionProvider` | available |
-| CUDA runtime | non disponibile (torch assente) | incompatible |
+| CUDA runtime | non verificabile in questa stanza ambiente | unverified |
 | teacher cache (`sentence-transformers/all-MiniLM-L6-v2`) | assente | missing |
 | ONNX quantization API importabili | non disponibile (`onnx` assente) | missing |
 
@@ -72,6 +72,7 @@ Proposta:
   - prova di smoke execution.
 
 Regola chiave: nessun claim di idoneità finché qualifica completa.
+Il preflight sintetico può verificare solo plumbing e non produce evidence qualificante M1; una evidence qualificante M1 richiede la qualifica reale del teacher.
 
 ## 5) Fase M1.2 — Dataset design
 
@@ -79,8 +80,10 @@ Il fixture a 5 query rimane fixture di plumbing e non deve diventare training/ev
 
 Struttura dataset proposta:
 
-- split `calibration` (estimare variabilità e nullo);
-- split `validation` (tuning non decisivo, solo diagnostica);
+- split `measurement_null` (stima della variabilità e del rumore dello strumento);
+- split `quantization_calibration` (range/parametri per la quantizzazione, non usato in decisione finale);
+- split `contract_development` (definizione del contratto, diagnostica preliminare);
+- split `validation` (valutazioni pre-promozione, senza determinare soglie finali);
 - split `frozen_critical` (regressioni bloccanti);
 - split `final_holdout` (decisione finale).
 
@@ -93,6 +96,8 @@ Gli split includono:
 - strati lessicali e semantici.
 
 Regola: holdout non usato per scegliere trasformazioni.
+
+- `measurement_null` e `contract_development` non partecipano alla promozione finale.
 
 ## 6) Fase M1.3 — PyTorch FP32 baseline
 
@@ -131,7 +136,11 @@ Punti di piano:
 - rappresentazione replay;
 - confronto sistemi.
 
-L’errore di export o operatore non supportato deve rendere decisione FAIL-closed.
+L’errore di export o operatore non supportato deve impedire la promozione, ma non equivale a evidenza di regressione.
+In pratica:
+
+- outcome operativo previsto: `EXECUTION_ERROR` / `BLOCKED` (o equivalente);
+- `FAIL` rimane riservato al candidato misurato nel confronto con evidenza valida.
 
 Nessuna logica di quantizzazione in questa fase.
 
@@ -190,7 +199,7 @@ Il fallimento della transizione A deve impedire la promozione B.
 
 Le evidenze devono includere:
 
-- manifest immutabili per manifest, osservazioni, decisioni e controlli;
+- manifest con evidenza tamper-evident per manifest, osservazioni, decisioni e controlli;
 - evidenze per transizione;
 - hash canonici e tracciamento seed/config.
 
@@ -230,18 +239,20 @@ Kill conditions predefinite:
 
 | Path | Azione | Responsabilità | Motivo | Dipendenze | Test | Artifact |
 |---|---|---|---|---|---|---|
-| `src/neural_continuity/models.py` | modify | manifest e wrapper embedding | Estendere con adapter ONNX specifici | `metrics`, `observations` | adapter correctness, deterministic output | candidati di osservazioni |
-| `src/neural_continuity/observations.py` | modify | separare metadati e metriche per run transizione | Differenziare transizioni e controlli | `models`, `datasets` | NaN/inf, missing outputs | observation rows/parquet |
-| `src/neural_continuity/cli.py` | modify | orchestrazione transizioni A/B, control plan espliciti | Punto di comando unico e replay coerente | `evidence`, `metrics` | m0 replay parity, boundary synthetic | decisioni, control outcomes |
-| `src/neural_continuity/decisions.py` | modify | policy acceptance per detectability/materiality | Distinguere envelope e materialità | `metrics`, `contracts` | interval boundary logic | reason payload |
-| `src/neural_continuity/evidence.py` | modify | manifest separati per transizione | Immutabilità e audit | `observations`, `bootstrap` | hash mutation | artifact-manifest |
-| `src/neural_continuity/contracts/` | create | contract M1 metric policy esteso | Versionamento regole e non-blocchi | nessuna dipendenza interna forte | load/validate schema | manifest di contratto |
-| `src/neural_continuity/adapters/` | create | adapter ONNX/quantization | Isolare conversion e inferenza | `onnx`, `onnxruntime` | export integrity | export artifacts |
-| `src/neural_continuity/transitions/` | create | orchestrare A e B come transizioni separate | separare causa export/quantizzazione | `models`, `adapters`, `decisions` | transizione A/B smoke | decision boundary package |
-| `experiments/` | modify | configurazioni M1 A/B + boundary controls dedicati | Configurazione esplicita per run | `contracts`, `docs` | run smoke docs | run configs |
-| `tests/test_measurements.py` | modify | aggiungere test transizione e replay fail-closed specifici | protezione regressioni M1 | `fixtures`, `cli` | suite M1.0 | golden assertions |
-| `tests/fixtures/` | modify | dataset M1 con split e split ids stabili | supporto misurazione separata | `datasets` | fixture validation | fixture hashes |
-| `docs/M1_ACTION_PLAN.md` | modify | piano operativo | Artefatto guida vivo per M1 | nessuna | n/a | documentazione |
+| `src/neural_continuity/models.py` | modify | mantenere protocollo embedding comune | Separare logica modello da adapter runtime | `metrics`, `observations` | interfaccia deterministica | manifest base |
+| `src/neural_continuity/adapters/pytorch.py` | create | adapter PyTorch specifico | Innesco reale della fase M1.0 e compatibilità `models.py` | `torch`, `metrics` | parity e determinismo | manifest modello |
+| `src/neural_continuity/adapters/onnx_runtime.py` | create | adapter ONNX Runtime | inferenza ONNX isolata | `onnxruntime`, `observations` | export-integrity e replay | artifact ONNX |
+| `src/neural_continuity/transitions/export_onnx.py` | create | transizione A: export PyTorch→ONNX | separazione semantica da quantizzazione | `adapters`, `evidence` | smoke export + diff check | report transizione A |
+| `src/neural_continuity/transitions/quantize_onnx.py` | create | transizione B: ONNX FP32→INT8 | quantizzazione solo dopo successo A | `transitions/export_onnx` | smoke quantizzazione statica/dinamica | report transizione B |
+| `src/neural_continuity/decisions.py` | modify | accettazione detectability/materiality | Distinguere envelope e materialità con stato coerente | `metrics`, `contracts` | boundary logic | reason payload |
+| `src/neural_continuity/evidence.py` | modify | manifest separati per transizione | evidenza riproducibile per A/B | `observations`, `bootstrap` | hash mutation | artifact-manifest |
+| `src/neural_continuity/cli.py` | modify (dispatch only) | parsing e dispatch verso orchestratore M1 | mantenere CLI snella e prevedibile | `run.py` | dispatch tests | result payload |
+| `src/neural_continuity/run.py` | create | orchestratore M1 dedicato | logica M1 separata da M0 core | `transitions`, `decisions` | suite M1.0 | stato run |
+| `contracts/` | extend (no duplicate path) | schema unico contrattuale | evitare autorità duplicate | `metrics` | schema validate | manifest contrattuali |
+| `experiments/` | modify | config M1 A/B con split dichiarati | gestione esplicita transizioni e dataset | `contracts`, `docs` | run smoke | run configs |
+| `tests/test_measurements.py` | modify | test transizioni A/B e fail-closed tecnico | protezione regressioni M1 | `fixtures`, `cli` | suite M1.0 | golden assertions |
+| `tests/fixtures/` | modify | dataset M1 con split non ambigui e ids stabili | test deterministici e tracciabili | `datasets` | fixture validation | fixture hashes |
+| `docs/M1_ACTION_PLAN.md` | modify | piano operativo | guida viva M1 aggiornata in base ai vincoli | nessuna | n/a | documentazione |
 
 ## 13) Piano dipendenze e split (dichiarazione finale)
 
@@ -250,24 +261,24 @@ Kill conditions predefinite:
 | Item | Available | Missing | Incompatible | Unverified |
 |---|---:|---:|---:|---:|
 | Python runtime | `3.13.5` |  |  |  |
-| PyTorch |  |  | `3.13.5 environment (non installed)` |  |
+| PyTorch |  | `3.13.5 environment (non installed)` |  |  |
 | ONNX |  | `M1 environment` |  |  |
 | ONNX Runtime | `1.22.1` |  |  |  |
 | Sentence Transformers |  | `Dipendente da torch` |  |  |
-| CUDA EP |  |  | non disponibile senza torch |  |
+| CUDA EP |  |  |  | non verificabile senza torch |
 | Teacher cache |  | `missing` |  |  |
-| ONNX quantization API |  |  | assente senza ONNX |  |
+| ONNX quantization API |  | `assente senza ONNX` |  |  |
 
 ### Transition decomposition
 
 1. Transition A
    - Input: modello PyTorch/torch-simile FP32.
    - Output: artifact ONNX FP32.
-   - Gate: pass/fail del controllo M0-equivalente.
+   - Gate: `PASS` / `FAIL` / `INCONCLUSIVE`.
 2. Transition B
    - Input: ONNX FP32.
    - Output: ONNX INT8 quantizzato.
-   - Gate: B richiede A passata.
+   - Gate: `PASS` / `FAIL` / `INCONCLUSIVE`; B richiede A in `PASS`.
 
 ### File-level change map
 
@@ -275,7 +286,9 @@ Vedi sezione 12.
 
 ### Dataset and split plan
 
-- calibrazione: `calibration`;
+- measurement_null: `measurement_null`;
+- quantization_calibration: `quantization_calibration`;
+- contract_development: `contract_development`;
 - validazione: `validation`;
 - congelamento funzionale: `frozen_critical`;
 - conclusione: `final_holdout`.
@@ -331,7 +344,7 @@ Vedi sezione 12.
 
 ### Unresolved concrete decisions
 
-- scelta tra `PyTorch` reale e baseline simulata per primo run in ambienti senza torch;
+- distinzione tra `synthetic preflight` e `real teacher qualification`.
 - provider ONNX prioritario in ambiente CPU-only;
 - schema finale di `acceptance contract` (numeri e famiglie);
 - soglia hardware per promozione transizione INT8.
@@ -345,3 +358,22 @@ Vedi sezione 12.
 - `M1_RESEARCH_GUIDE.md` allineata con terminologia M0 (`negative` vs `material-negative`).
 - Nessun codice implementativo introdotto.
 - Prossima fase: revisione M1 plan dopo disponibilità dipendenze `torch/onnx/sentence-transformers`.
+
+## Pre-implementation quality gate
+
+Checklist di rilascio pre-codice:
+
+- ambito M1 coerente;
+- invarianti M0 congelate intatte;
+- nessuna soglia scelta da candidato o holdout;
+- detectability e tolleranze operative separate;
+- A/B decisionali indipendenti;
+- B non procede se A non è `PASS`;
+- errori tecnici non diventano regressioni scientifiche;
+- split distinti: `measurement_null`, `quantization_calibration`, `contract_development`, `validation`, `frozen_critical`, `final_holdout`;
+- fixture a 5 query solo plumbing;
+- identità teacher reale e preprocessing congelati;
+- replay planned per run e controlli;
+- fall-closed su ogni artifact/observazione dichiarato mancante;
+- niente Spectra, distillazione, potatura, routing o milestone successive;
+- first slice ferma prima dell’export ONNX.
