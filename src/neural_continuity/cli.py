@@ -11,7 +11,13 @@ import yaml
 
 from . import FAIL, INCONCLUSIVE, PASS
 from .bootstrap import build_envelopes
-from .datasets import RetrievalFixture, fixture_identity, load_retrieval_fixture
+from .datasets import (
+    RetrievalFixture,
+    fixture_from_payload,
+    fixture_identity,
+    fixture_payload,
+    load_retrieval_fixture,
+)
 from .decisions import evaluate_comparison
 from .evidence import (
     build_environment_manifest,
@@ -23,14 +29,19 @@ from .evidence import (
 )
 from .metrics import (
     METRIC_POLICIES,
+    MetricPolicy,
     METRIC_POLICIES_VERSION,
     REQUIRED_METRICS,
     compare_observations,
+    load_metric_policies_from_mapping,
+    load_metric_policies_from_path,
+    metric_policies_payload,
 )
 from .models import PerturbedModel, SentenceTransformerModel, ToyEmbeddingModel
 from .observations import (
     ModelObservation,
     evaluate_model,
+    observation_from_manifest,
     save_raw_observations_parquet,
 )
 from .perturbations import perturbation_from_config
@@ -684,13 +695,996 @@ def run_m0(config_path: Path, output_root: Path) -> dict[str, Any]:
     }
 
 
+def _ordered_metric_ids(policies: list[MetricPolicy]) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for policy in policies:
+        if policy.metric_id not in seen:
+            seen.add(policy.metric_id)
+            ordered.append(policy.metric_id)
+    return ordered
+
+
+def _resolve_metric_policies(
+    config_path: Path, config: dict[str, Any], contract_path: Path
+) -> tuple[list[MetricPolicy], str]:
+    configured = config.get("metric_policies")
+    if isinstance(configured, list):
+        return (
+            load_metric_policies_from_mapping(
+                {
+                    "metric_policies": configured,
+                    "version": str(config.get("metric_policies_version", "1.0.0")),
+                }
+            ),
+            str(config.get("metric_policies_version", "1.0.0")),
+        )
+
+    if isinstance(configured, dict):
+        return (
+            load_metric_policies_from_mapping(configured),
+            str(configured.get("version", config.get("metric_policies_version", "1.0.0"))),
+        )
+
+    if isinstance(config.get("metric_policies_path"), str):
+        policy_path = (config_path.parent / str(config["metric_policies_path"])).resolve()
+    else:
+        fallback = contract_path.parent / "m0-metric-policies-v1.json"
+        if fallback.exists():
+            policy_path = fallback
+        else:
+            policy_path = config_path.parent / "contracts" / "m0-metric-policies-v1.json"
+    return load_metric_policies_from_path(policy_path)
+
+
+def _load_control_meta(value: Any, default: Any) -> Any:
+    return value if isinstance(value, dict) else default
+
+
+def _status_match(expected: str, actual: str) -> str:
+    if actual == expected:
+        return PASS
+    if expected == PASS:
+        return INCONCLUSIVE if actual == INCONCLUSIVE else FAIL
+    if expected == FAIL:
+        return INCONCLUSIVE if actual == INCONCLUSIVE else FAIL
+    return FAIL if actual == PASS else INCONCLUSIVE
+
+
+def _compute_control_health(control_records: list[dict[str, Any]]) -> tuple[str, str]:
+    raw_control_status = PASS
+    for record in control_records:
+        if not record.get("enabled", False):
+            continue
+        actual = str(record.get("decision", {}).get("status", INCONCLUSIVE))
+        expected = str(record.get("expected_status", PASS))
+        status = _status_match(expected=expected, actual=actual)
+        record["control_status"] = status
+        if status == FAIL:
+            raw_control_status = FAIL
+        elif status == INCONCLUSIVE and raw_control_status == PASS:
+            raw_control_status = INCONCLUSIVE
+
+    measurement_integrity_status = raw_control_status
+    return measurement_integrity_status, raw_control_status
+
+
+def _run_null_v2(
+    model: Any,
+    model_manifest: dict[str, Any],
+    fixture: RetrievalFixture,
+    null_cfg: dict[str, Any],
+    topology_k: int,
+    metric_policies: list[MetricPolicy],
+) -> tuple[ModelObservation, list[ModelObservation], list[dict[str, Any]], list[dict[str, Any]]]:
+    batch_sizes = [int(v) for v in null_cfg.get("batch_sizes", [1])]
+    repeats = int(null_cfg.get("repeats", 2))
+    base_batch = batch_sizes[0]
+    null_seed = int(null_cfg.get("random_seed", 0))
+
+    baseline = _run_observation(
+        model=model,
+        manifest=model_manifest,
+        fixture=fixture,
+        batch_size=base_batch,
+        label=f"null-baseline-b{base_batch}",
+    )
+
+    observations: list[ModelObservation] = [baseline]
+    comparisons: list[dict[str, Any]] = []
+    null_plan: list[dict[str, Any]] = []
+    for repeat in range(repeats):
+        for batch_size in batch_sizes:
+            if repeat == 0 and batch_size == base_batch:
+                continue
+
+            run_label = f"null-r{repeat}-b{batch_size}"
+            obs = _run_observation(
+                model=model,
+                manifest=model_manifest,
+                fixture=fixture,
+                batch_size=batch_size,
+                label=run_label,
+            )
+            observations.append(obs)
+
+            comparison = compare_observations(
+                baseline,
+                obs,
+                fixture,
+                topology_k=topology_k,
+                metric_bootstrap_samples=int(null_cfg.get("bootstrap_samples", 500)),
+                metric_bootstrap_seed=null_seed + repeat,
+                confidence_level=float(null_cfg.get("confidence_level", 0.99)),
+                metric_policies=metric_policies,
+            )
+            comparison["control"] = "null"
+            comparison["run_label"] = run_label
+            comparison["seed"] = null_seed + repeat
+            comparison["batch_size"] = batch_size
+            if batch_size == base_batch and repeat > 0:
+                comparison["noise_source"] = "repeated_inference"
+            elif batch_size != base_batch:
+                comparison["noise_source"] = "batch_size_variation"
+            else:
+                comparison["noise_source"] = "runtime_or_hardware"
+            comparison["sample_count"] = len(fixture.queries)
+            comparison["runtime_hardware"] = obs.system_metrics["hardware"]
+
+            comparisons.append(comparison)
+            null_plan.append(
+                {
+                    "run_label": run_label,
+                    "seed": null_seed + repeat,
+                    "batch_size": batch_size,
+                    "noise_source": comparison["noise_source"],
+                }
+            )
+
+    return baseline, observations, comparisons, null_plan
+
+
+def _run_control_v2(
+    control_name: str,
+    model: Any,
+    model_manifest: dict[str, Any],
+    baseline: ModelObservation,
+    fixture: RetrievalFixture,
+    topology_k: int,
+    envelopes: dict[str, Any],
+    batch_size: int,
+    metric_bootstrap_samples: int,
+    metric_bootstrap_seed: int,
+    candidate_confidence_level: float,
+    metric_policies: list[MetricPolicy],
+    required_metrics: list[str],
+) -> tuple[dict[str, Any], dict[str, Any], ModelObservation]:
+    observation = _run_observation(
+        model=model,
+        manifest=model_manifest,
+        fixture=fixture,
+        batch_size=batch_size,
+        label=control_name,
+    )
+    comparison = compare_observations(
+        source=baseline,
+        candidate=observation,
+        fixture=fixture,
+        topology_k=topology_k,
+        metric_bootstrap_samples=metric_bootstrap_samples,
+        metric_bootstrap_seed=metric_bootstrap_seed,
+        confidence_level=candidate_confidence_level,
+        metric_policies=metric_policies,
+    )
+    comparison["control"] = control_name
+    comparison["run_label"] = control_name
+    comparison["batch_size"] = batch_size
+    comparison["sample_count"] = len(fixture.queries)
+
+    decision = evaluate_comparison(
+        comparison,
+        envelopes,
+        required_metrics=required_metrics,
+        metric_policies=metric_policies,
+    )
+    return comparison, decision.as_dict(), observation
+
+
+def _run_boundary_v2(
+    boundary_cfg: dict[str, Any],
+    model: Any,
+    model_manifest: dict[str, Any],
+    baseline: ModelObservation,
+    fixture: RetrievalFixture,
+    topology_k: int,
+    envelopes: dict[str, Any],
+    metric_bootstrap_samples: int,
+    metric_bootstrap_seed: int,
+    candidate_confidence_level: float,
+    metric_policies: list[MetricPolicy],
+    required_metrics: list[str],
+    batch_size: int,
+) -> tuple[dict[str, Any], dict[str, Any], ModelObservation, dict[str, Any]]:
+    attempts = max(1, int(boundary_cfg.get("attempts", 8)))
+    base_strength = float(boundary_cfg.get("strength", 0.1))
+    base_seed = int(boundary_cfg.get("seed", 0))
+    base_batch = int(batch_size)
+    selected_attempt: dict[str, Any] = {}
+    attempt_results: list[dict[str, Any]] = []
+    selected_payload: tuple[dict[str, Any], dict[str, Any], ModelObservation] | None = None
+
+    for attempt in range(attempts):
+        attempt_cfg = dict(boundary_cfg)
+        attempt_seed = base_seed + attempt
+        attempt_strength = base_strength * (1.0 + 0.5 * attempt)
+        if attempt > 0 and attempt_strength == 0.0:
+            attempt_strength = 0.1 * (attempt + 1)
+        attempt_cfg["seed"] = attempt_seed
+        attempt_cfg["strength"] = attempt_strength
+        attempt_cfg["batch_size"] = base_batch
+        boundary_model, boundary_manifest = _build_perturbed(
+            base_model=model,
+            base_manifest=model_manifest,
+            cfg=attempt_cfg,
+        )
+        comparison, decision, observation = _run_control_v2(
+            control_name="boundary",
+            model=boundary_model,
+            model_manifest=boundary_manifest,
+            baseline=baseline,
+            fixture=fixture,
+            topology_k=topology_k,
+            envelopes=envelopes,
+            batch_size=base_batch,
+            metric_bootstrap_samples=metric_bootstrap_samples,
+            metric_bootstrap_seed=metric_bootstrap_seed + 200 + attempt,
+            candidate_confidence_level=candidate_confidence_level,
+            metric_policies=metric_policies,
+            required_metrics=required_metrics,
+        )
+        attempt_payload = {
+            "run_label": "boundary",
+            "attempt": attempt,
+            "seed": attempt_seed,
+            "strength": attempt_strength,
+            "status": decision.get("status"),
+            "metric_bootstrap_seed": metric_bootstrap_seed + 200 + attempt,
+        }
+        attempt_results.append(attempt_payload)
+        selected_payload = (comparison, decision, observation)
+        selected_attempt = attempt_payload
+        if decision.get("status") != PASS:
+            break
+
+    if selected_payload is None:
+        raise CommandError("boundary search produced no attempt payload")
+
+    return *selected_payload, {"attempt_count": attempts, "attempts": attempt_results, "selected_attempt": selected_attempt}
+
+
+def _control_record_payload(
+    control_records: list[dict[str, Any]], measurement_integrity_status: str, raw_control_status: str
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "control": item["control"],
+            "status": item["decision"].get("status"),
+            "control_status": item.get("control_status"),
+            "expected_status": item["expected_status"],
+            "enabled": item.get("enabled", False),
+            "decision_matches_expected": item["decision_matches_expected"],
+            "run": item.get("run"),
+        }
+        for item in control_records
+    ]
+
+
+def _rebuild_control_plan(
+    control_records: list[dict[str, Any]], metric_policies_payload: list[dict[str, Any]]
+) -> dict[str, Any]:
+    return {
+        "exact_repeat": [item for item in control_records if item["control"] == "exact_repeat"],
+        "negative": [item for item in control_records if item["control"] == "negative"],
+        "boundary": [item for item in control_records if item["control"] == "boundary"],
+        "metric_policies": metric_policies_payload,
+    }
+
+
+def run_m0(config_path: Path, output_root: Path) -> dict[str, Any]:
+    config_path = Path(config_path).resolve()
+    contract_path = config_path.parent / str(
+        _load_yaml(config_path).get("contract", "contracts/m0-measurement-integrity-v1.json")
+    )
+    config = _load_yaml(config_path)
+    contract = _load_contract(contract_path)
+    _validate_config(config, contract)
+
+    metric_policies, metric_policies_version = _resolve_metric_policies(
+        config_path=config_path, config=config, contract_path=contract_path
+    )
+    metric_policies_payload = metric_policies_payload(metric_policies)
+    required_metrics = _ordered_metric_ids(metric_policies)
+
+    fixture = load_retrieval_fixture(config_path.parent / config["dataset"]["path"])
+    model, model_manifest, is_real_teacher = _build_model(config)
+    topology_k = int(config.get("runtime", {}).get("topology_k", 5))
+    metric_bootstrap_samples = int(
+        config["null"].get("candidate_bootstrap_samples", config["null"].get("bootstrap_samples", 500))
+    )
+    metric_bootstrap_seed = int(
+        config["null"].get("candidate_random_seed", config["null"].get("random_seed", 17))
+    )
+    candidate_confidence_level = float(
+        config["null"].get(
+            "candidate_confidence_level", config["null"].get("confidence_level", 0.99)
+        )
+    )
+
+    baseline, null_observations, null_comparisons, null_plan = _run_null_v2(
+        model=model,
+        model_manifest=model_manifest,
+        fixture=fixture,
+        null_cfg=config["null"],
+        topology_k=topology_k,
+        metric_policies=metric_policies,
+    )
+    all_observations: list[ModelObservation] = list(null_observations)
+
+    envelopes = build_envelopes(
+        null_comparisons,
+        metric_policies=metric_policies_payload,
+        bootstrap_samples=int(config["null"].get("bootstrap_samples", 500)),
+        confidence_level=float(config["null"].get("confidence_level", 0.99)),
+        seed=int(config["null"].get("random_seed", 17)),
+    )
+
+    null_payload = {
+        "comparisons": null_comparisons,
+        "envelope_config": {
+            "bootstrap_samples": int(config["null"].get("bootstrap_samples", 500)),
+            "confidence_level": float(config["null"].get("confidence_level", 0.99)),
+            "random_seed": int(config["null"].get("random_seed", 17)),
+        },
+        "metric_policies": {
+            "version": metric_policies_version,
+            "metric_policies": metric_policies_payload,
+        },
+    }
+
+    control_records: list[dict[str, Any]] = []
+    exact_outputs: list[dict[str, Any]] = []
+    exact_plan: list[dict[str, Any]] = []
+    exact_runs = int(config["controls"]["exact_repeat"].get("repeats", 1))
+    exact_enabled = bool(config["controls"]["exact_repeat"].get("enabled", True))
+    base_batch = int(config["null"]["batch_sizes"][0])
+    for i in range(exact_runs if exact_enabled else 0):
+        comparison, decision, obs = _run_control_v2(
+            control_name=f"exact_repeat_{i}",
+            model=model,
+            model_manifest=model_manifest,
+            baseline=baseline,
+            fixture=fixture,
+            topology_k=topology_k,
+            envelopes=envelopes,
+            batch_size=base_batch,
+            metric_bootstrap_samples=metric_bootstrap_samples,
+            metric_bootstrap_seed=metric_bootstrap_seed + i,
+            candidate_confidence_level=candidate_confidence_level,
+            metric_policies=metric_policies,
+            required_metrics=required_metrics,
+        )
+        exact_outputs.append({**comparison, "decision": decision, "expected_status": PASS})
+        all_observations.append(obs)
+        control_records.append(
+            _control_record(
+                control="exact_repeat",
+                control_name=f"exact_repeat_{i}",
+                decision=decision,
+                comparison=comparison,
+                enabled=True,
+                expected_status=PASS,
+                comparison_run=i,
+            )
+        )
+        exact_plan.append(
+            {
+                "run_label": f"exact_repeat_{i}",
+                "seed": metric_bootstrap_seed + i,
+                "batch_size": base_batch,
+                "expected_status": PASS,
+                "run_index": i,
+                "enabled": True,
+            }
+        )
+
+    negative_output: dict[str, Any] = {"enabled": False}
+    negative_plan = {"enabled": False}
+    if config["controls"]["negative"].get("enabled", True):
+        negative_model, negative_manifest = _build_perturbed(
+            base_model=model,
+            base_manifest=model_manifest,
+            cfg=config["controls"]["negative"],
+        )
+        comparison, decision, obs = _run_control_v2(
+            control_name="negative",
+            model=negative_model,
+            model_manifest=negative_manifest,
+            baseline=baseline,
+            fixture=fixture,
+            topology_k=topology_k,
+            envelopes=envelopes,
+            batch_size=base_batch,
+            metric_bootstrap_samples=metric_bootstrap_samples,
+            metric_bootstrap_seed=metric_bootstrap_seed + 100,
+            candidate_confidence_level=candidate_confidence_level,
+            metric_policies=metric_policies,
+            required_metrics=required_metrics,
+        )
+        all_observations.append(obs)
+        negative_output = {
+            "enabled": True,
+            "expected_status": FAIL,
+            "comparison": comparison,
+            "decision": decision,
+        }
+        negative_plan = {
+            "run_label": "negative",
+            "enabled": True,
+            "expected_status": FAIL,
+            "seed": metric_bootstrap_seed + 100,
+            "batch_size": base_batch,
+            "run_index": 0,
+        }
+        control_records.append(
+            _control_record(
+                control="negative",
+                control_name="negative",
+                decision=decision,
+                comparison=comparison,
+                enabled=True,
+                expected_status=FAIL,
+            )
+        )
+
+    boundary_output: dict[str, Any] = {"enabled": False}
+    boundary_plan: dict[str, Any] = {"enabled": False}
+    if config["controls"]["boundary"].get("enabled", True):
+        comparison, decision, obs, boundary_meta = _run_boundary_v2(
+            boundary_cfg=config["controls"]["boundary"],
+            model=model,
+            model_manifest=model_manifest,
+            baseline=baseline,
+            fixture=fixture,
+            topology_k=topology_k,
+            envelopes=envelopes,
+            metric_bootstrap_samples=metric_bootstrap_samples,
+            metric_bootstrap_seed=metric_bootstrap_seed,
+            candidate_confidence_level=candidate_confidence_level,
+            metric_policies=metric_policies,
+            required_metrics=required_metrics,
+            batch_size=base_batch,
+        )
+        all_observations.append(obs)
+        boundary_output = {
+            "enabled": True,
+            "expected_status": INCONCLUSIVE,
+            "comparison": comparison,
+            "decision": decision,
+            "attempts": boundary_meta.get("attempts", []),
+            "selected_attempt": boundary_meta.get("selected_attempt"),
+        }
+        boundary_plan = {
+            "run_label": "boundary",
+            "expected_status": INCONCLUSIVE,
+            "enabled": True,
+            "batch_size": base_batch,
+            "attempts": boundary_meta.get("attempts", []),
+            "selected_attempt": boundary_meta.get("selected_attempt"),
+        }
+        control_records.append(
+            _control_record(
+                control="boundary",
+                control_name="boundary",
+                decision=decision,
+                comparison=comparison,
+                enabled=True,
+                expected_status=INCONCLUSIVE,
+            )
+        )
+
+    measurement_integrity_status, raw_control_status = _compute_control_health(control_records)
+    control_counts = {
+        "passed": len([item for item in control_records if item["decision"].get("status") == PASS]),
+        "failed": len([item for item in control_records if item["decision"].get("status") == FAIL]),
+        "inconclusive": len([item for item in control_records if item["decision"].get("status") == INCONCLUSIVE]),
+    }
+
+    control_status_payload = _control_record_payload(
+        control_records,
+        measurement_integrity_status,
+        raw_control_status,
+    )
+
+    decision_payload = {
+        "raw_control_status": raw_control_status,
+        "measurement_integrity_status": measurement_integrity_status,
+        "control_decisions": control_status_payload,
+        "control_counts": control_counts,
+        "required_evidence": {
+            "null_metric_count": len(null_comparisons),
+            "enabled_controls": len([rec for rec in control_records if rec.get("enabled")]),
+        },
+        "metric_policies": {
+            "version": metric_policies_version,
+            "metric_policies": metric_policies_payload,
+        },
+    }
+
+    run_id = time.strftime("%Y%m%d_%H%M%S") + "-" + uuid.uuid4().hex[:8]
+    run_dir = (output_root / run_id).resolve()
+
+    comparison_report = {
+        "exact_repeat": {
+            "enabled": exact_enabled,
+            "comparisons": [
+                {
+                    "run": f"exact_repeat_{idx}",
+                    "comparison": comp,
+                    "decision": comp.get("decision", {}),
+                    "expected_status": PASS,
+                    "decision_matches_expected": comp.get("decision", {}).get("status") == PASS,
+                }
+                for idx, comp in enumerate(exact_outputs)
+            ],
+        },
+        "negative": negative_output,
+        "boundary": boundary_output,
+        "null": null_payload,
+    }
+
+    dataset_payload = {
+        "fixture_path": str((config_path.parent / config["dataset"]["path"]).relative_to(config_path.parent)),
+        "fixture_id": fixture.fixture_id,
+        "fixture_identity_sha256": fixture_identity(fixture),
+        "fixture_payload": fixture_payload(fixture),
+        "query_count": len(fixture.queries),
+        "name": fixture.name,
+        "description": fixture.description,
+    }
+
+    model_payload = {
+        "source": model_manifest,
+        "negative_control": negative_output.get("comparison", {}).get("run_label") if negative_output.get("enabled") else None,
+        "boundary_control": boundary_output.get("comparison", {}).get("run_label") if boundary_output.get("enabled") else None,
+    }
+    metrics_payload = {
+        "required_metrics": required_metrics,
+        "metric_policies": metric_policies_payload,
+        "null": null_payload,
+        "exact_repeat": comparison_report["exact_repeat"],
+        "negative": comparison_report["negative"],
+        "boundary": comparison_report["boundary"],
+    }
+
+    environment_payload = build_environment_manifest()
+    environment_payload["git_commit"] = get_git_commit_sha()
+
+    artifacts = {
+        "model-manifest.json": model_payload,
+        "dataset-manifest.json": dataset_payload,
+        "environment-manifest.json": {
+            **environment_payload,
+            "commands": [f"neural-continuity m0-run --config {str(config_path)}"],
+        },
+        "experiment-config.json": {
+            **config,
+            "_resolved_path": str(config_path),
+        },
+        "metrics.json": metrics_payload,
+        "noise-envelope.json": null_payload,
+        "comparison-report.json": comparison_report,
+        "decision.json": decision_payload,
+    }
+
+    artifact_manifest = write_artifacts(run_dir, artifacts)["artifact-manifest"]
+    raw_observations_path = run_dir / "raw-observations.parquet"
+    save_raw_observations_parquet(all_observations, raw_observations_path)
+    control_plan = {
+        "baseline_observation": {"run_label": baseline.run_label},
+        "null_observations": null_plan,
+        "null_settings": {
+            "batch_sizes": [int(v) for v in config["null"].get("batch_sizes", [1])],
+            "repeats": int(config["null"].get("repeats", 2)),
+            "bootstrap_samples": int(config["null"].get("bootstrap_samples", 500)),
+            "confidence_level": float(config["null"].get("confidence_level", 0.99)),
+            "random_seed": int(config["null"].get("random_seed", 17)),
+        },
+        "exact_repeat": exact_plan,
+        "negative": negative_plan,
+        "boundary": boundary_plan,
+    }
+    replay_path = save_replay_bundle(
+        run_dir,
+        all_observations,
+        dataset_identity=dataset_payload,
+        config={
+            "topology_k": topology_k,
+            "metric_bootstrap_seed": metric_bootstrap_seed,
+            "metric_bootstrap_samples": metric_bootstrap_samples,
+            "candidate_confidence_level": candidate_confidence_level,
+            "required_metrics": required_metrics,
+            "metric_policies": {
+                "version": metric_policies_version,
+                "metric_policies": metric_policies_payload,
+            },
+            "control_plan": control_plan,
+            "recorded_decision": decision_payload,
+        },
+    )
+
+    artifact_manifest["artifacts"]["raw-observations.parquet"] = sha256_file(raw_observations_path)
+    artifact_manifest["artifacts"]["replay-bundle.json"] = sha256_file(Path(replay_path))
+    artifact_manifest["commands"] = [
+        f"neural-continuity m0-run --config {str(config_path)}",
+        f"neural-continuity m0-replay --bundle {str(replay_path)}",
+    ]
+    (run_dir / "artifact-manifest.json").write_bytes(canonical_json_bytes(artifact_manifest))
+
+    return {
+        "run_id": run_id,
+        "status": measurement_integrity_status,
+        "run_dir": str(run_dir),
+        "config": str(config_path),
+        "artifact_hierarchy": [
+            "model-manifest.json",
+            "dataset-manifest.json",
+            "environment-manifest.json",
+            "experiment-config.json",
+            "raw-observations.parquet",
+            "metrics.json",
+            "noise-envelope.json",
+            "comparison-report.json",
+            "decision.json",
+            "replay-bundle.json",
+            "artifact-manifest.json",
+        ],
+        "artifact_manifest": artifact_manifest,
+        "decision": decision_payload,
+        "real_teacher_executed": is_real_teacher and model_manifest["model_type"] == "sentence-transformers",
+        "null_metric_count": len(null_comparisons),
+        "measurement_integrity_status": measurement_integrity_status,
+        "raw_control_status": raw_control_status,
+        "control_metrics": {
+            "exact_repeat_runs": len(exact_outputs),
+            "negative_runs": 1 if negative_output.get("enabled") else 0,
+            "boundary_runs": 1 if boundary_output.get("enabled") else 0,
+        },
+        "control_records": control_records,
+        "control_plan": control_plan,
+    }
+
+
+def _load_replay_metadata(bundle: dict[str, Any]) -> dict[str, Any]:
+    experiment = bundle.get("experiment")
+    if isinstance(experiment, dict):
+        return experiment
+    return {}
+
+
+def _load_replay_bundle(path: Path) -> dict[str, Any]:
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise CommandError("replay payload must be a JSON object")
+    return payload
+
+
+def run_m0_replay(replay_bundle_path: Path, output_root: Path | None = None) -> dict[str, Any]:
+    payload = _load_replay_bundle(Path(replay_bundle_path))
+    dataset = payload.get("dataset")
+    if not isinstance(dataset, dict):
+        raise CommandError("invalid replay payload: missing dataset" )
+
+    fixture_data = dataset.get("fixture_payload")
+    if isinstance(fixture_data, dict) and fixture_data.get("queries"):
+        fixture = fixture_from_payload(fixture_data)
+    else:
+        path_value = dataset.get("fixture_path")
+        if not isinstance(path_value, str):
+            raise CommandError("replay payload missing fixture payload and fixture_path")
+        fixture = load_retrieval_fixture((replay_bundle_path.parent / path_value).resolve())
+
+    raw_observations = payload.get("observations", [])
+    if not isinstance(raw_observations, list) or not raw_observations:
+        raise CommandError("invalid replay payload: missing observations")
+    observations = [observation_from_manifest(raw) for raw in raw_observations if isinstance(raw, dict)]
+    by_label = {obs.run_label: obs for obs in observations}
+    if not by_label:
+        raise CommandError("replay payload observations are malformed")
+
+    experiment = _load_replay_metadata(payload)
+    topology_k = int(experiment.get("topology_k", 5))
+    metric_bootstrap_samples = int(experiment.get("metric_bootstrap_samples", 500))
+    metric_bootstrap_seed = int(experiment.get("metric_bootstrap_seed", 17))
+    candidate_confidence_level = float(experiment.get("candidate_confidence_level", 0.99))
+    required_metrics = experiment.get("required_metrics") or [policy.metric_id for policy in METRIC_POLICIES]
+    if not required_metrics:
+        required_metrics = [policy.metric_id for policy in METRIC_POLICIES]
+
+    metric_policies_payload_raw = experiment.get(
+        "metric_policies",
+        {
+            "version": METRIC_POLICIES_VERSION,
+            "metric_policies": metric_policies_payload(METRIC_POLICIES),
+        },
+    )
+    metric_policies = load_metric_policies_from_mapping(metric_policies_payload_raw)
+    metric_policies_payload_for_build = metric_policies_payload(metric_policies)
+
+    control_plan = experiment.get("control_plan", {})
+    if not isinstance(control_plan, dict):
+        control_plan = {}
+    baseline_label = None
+    if isinstance(control_plan.get("baseline_observation"), dict):
+        baseline_label = control_plan["baseline_observation"].get("run_label")
+    if baseline_label not in by_label:
+        baseline_label = next((label for label in by_label if label.startswith("null-baseline")), None)
+    if baseline_label not in by_label:
+        baseline_label = next(iter(by_label))
+    baseline = by_label[baseline_label]
+
+    null_plan = control_plan.get("null_observations", [])
+    if not isinstance(null_plan, list):
+        null_plan = [
+            {
+                "run_label": label,
+                "seed": idx,
+                "batch_size": by_label[label].batch_size if label in by_label else 1,
+                "noise_source": "unknown",
+            }
+            for idx, label in enumerate(sorted([label for label in by_label if label.startswith("null-r")]))
+        ]
+    null_comparisons: list[dict[str, Any]] = []
+    for idx, item in enumerate(null_plan):
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("run_label", ""))
+        if not label or label not in by_label:
+            continue
+        obs = by_label[label]
+        comparison = compare_observations(
+            source=baseline,
+            candidate=obs,
+            fixture=fixture,
+            topology_k=topology_k,
+            metric_bootstrap_samples=metric_bootstrap_samples,
+            metric_bootstrap_seed=metric_bootstrap_seed + idx,
+            confidence_level=float(item.get("confidence_level", candidate_confidence_level)),
+            metric_policies=metric_policies,
+        )
+        comparison["control"] = "null"
+        comparison["run_label"] = label
+        comparison["seed"] = item.get("seed", metric_bootstrap_seed + idx)
+        comparison["batch_size"] = item.get("batch_size", obs.batch_size)
+        comparison["sample_count"] = len(fixture.queries)
+        comparison["noise_source"] = item.get("noise_source", "unknown")
+        null_comparisons.append(comparison)
+
+    null_settings = control_plan.get("null_settings", {})
+    envelopes = build_envelopes(
+        null_comparisons,
+        metric_policies=metric_policies_payload_for_build,
+        bootstrap_samples=int(null_settings.get("bootstrap_samples", metric_bootstrap_samples)),
+        confidence_level=float(null_settings.get("confidence_level", candidate_confidence_level)),
+        seed=int(null_settings.get("random_seed", 17)),
+    )
+
+    control_records: list[dict[str, Any]] = []
+    for idx, row in enumerate(control_plan.get("exact_repeat", []) if isinstance(control_plan.get("exact_repeat"), list) else []):
+        if not isinstance(row, dict) or not row.get("enabled", True):
+            continue
+        label = str(row.get("run_label", f"exact_repeat_{idx}"))
+        obs = by_label.get(label)
+        if obs is None:
+            continue
+        comparison = compare_observations(
+            source=baseline,
+            candidate=obs,
+            fixture=fixture,
+            topology_k=topology_k,
+            metric_bootstrap_samples=metric_bootstrap_samples,
+            metric_bootstrap_seed=int(row.get("seed", metric_bootstrap_seed + idx)),
+            confidence_level=float(row.get("confidence_level", candidate_confidence_level)),
+            metric_policies=metric_policies,
+        )
+        comparison["control"] = "exact_repeat"
+        comparison["run_label"] = label
+        comparison["sample_count"] = len(fixture.queries)
+        comparison["seed"] = row.get("seed", metric_bootstrap_seed + idx)
+        decision = evaluate_comparison(
+            comparison,
+            envelopes,
+            required_metrics=required_metrics,
+            metric_policies=metric_policies,
+        )
+        control_records.append(
+            _control_record(
+                control="exact_repeat",
+                control_name=label,
+                decision=decision.as_dict(),
+                comparison=comparison,
+                enabled=True,
+                expected_status=row.get("expected_status", PASS),
+                comparison_run=idx,
+            )
+        )
+
+    negative_plan = _load_control_meta(control_plan.get("negative"), {"enabled": False, "expected_status": FAIL})
+    if negative_plan.get("enabled"):
+        negative_label = str(negative_plan.get("run_label", "negative"))
+        negative_obs = by_label.get(negative_label)
+        if negative_obs is None:
+            control_records.append(
+                _control_record(
+                    control="negative",
+                    control_name="negative",
+                    decision={"status": INCONCLUSIVE},
+                    comparison=None,
+                    enabled=False,
+                    expected_status=negative_plan.get("expected_status", FAIL),
+                )
+            )
+        else:
+            comparison = compare_observations(
+                source=baseline,
+                candidate=negative_obs,
+                fixture=fixture,
+                topology_k=topology_k,
+                metric_bootstrap_samples=metric_bootstrap_samples,
+                metric_bootstrap_seed=int(negative_plan.get("seed", metric_bootstrap_seed + 100)),
+                confidence_level=float(negative_plan.get("confidence_level", candidate_confidence_level)),
+                metric_policies=metric_policies,
+            )
+            comparison["control"] = "negative"
+            comparison["run_label"] = negative_label
+            comparison["sample_count"] = len(fixture.queries)
+            comparison["seed"] = negative_plan.get("seed", metric_bootstrap_seed + 100)
+            decision = evaluate_comparison(
+                comparison,
+                envelopes,
+                required_metrics=required_metrics,
+                metric_policies=metric_policies,
+            )
+            control_records.append(
+                _control_record(
+                    control="negative",
+                    control_name=negative_label,
+                    decision=decision.as_dict(),
+                    comparison=comparison,
+                    enabled=True,
+                    expected_status=negative_plan.get("expected_status", FAIL),
+                    comparison_run=0,
+                )
+            )
+    else:
+        control_records.append(
+            _control_record(
+                control="negative",
+                control_name="negative",
+                decision={"status": INCONCLUSIVE},
+                comparison=None,
+                enabled=False,
+                expected_status=negative_plan.get("expected_status", FAIL),
+            )
+        )
+
+    boundary_plan = _load_control_meta(control_plan.get("boundary"), {"enabled": False, "expected_status": INCONCLUSIVE})
+    if boundary_plan.get("enabled"):
+        boundary_label = str(boundary_plan.get("run_label", "boundary"))
+        boundary_obs = by_label.get(boundary_label)
+        if boundary_obs is None:
+            control_records.append(
+                _control_record(
+                    control="boundary",
+                    control_name="boundary",
+                    decision={"status": INCONCLUSIVE},
+                    comparison=None,
+                    enabled=False,
+                    expected_status=boundary_plan.get("expected_status", INCONCLUSIVE),
+                )
+            )
+        else:
+            selected_attempt = boundary_plan.get("selected_attempt", {})
+            comparison = compare_observations(
+                source=baseline,
+                candidate=boundary_obs,
+                fixture=fixture,
+                topology_k=topology_k,
+                metric_bootstrap_samples=metric_bootstrap_samples,
+                metric_bootstrap_seed=int(selected_attempt.get("metric_bootstrap_seed", metric_bootstrap_seed + 200)),
+                confidence_level=float(selected_attempt.get("confidence_level", candidate_confidence_level)),
+                metric_policies=metric_policies,
+            )
+            comparison["control"] = "boundary"
+            comparison["run_label"] = boundary_label
+            comparison["sample_count"] = len(fixture.queries)
+            comparison["seed"] = selected_attempt.get("seed", metric_bootstrap_seed + 200)
+            decision = evaluate_comparison(
+                comparison,
+                envelopes,
+                required_metrics=required_metrics,
+                metric_policies=metric_policies,
+            )
+            control_records.append(
+                _control_record(
+                    control="boundary",
+                    control_name=boundary_label,
+                    decision=decision.as_dict(),
+                    comparison=comparison,
+                    enabled=True,
+                    expected_status=boundary_plan.get("expected_status", INCONCLUSIVE),
+                    comparison_run=0,
+                )
+            )
+    else:
+        control_records.append(
+            _control_record(
+                control="boundary",
+                control_name="boundary",
+                decision={"status": INCONCLUSIVE},
+                comparison=None,
+                enabled=False,
+                expected_status=boundary_plan.get("expected_status", INCONCLUSIVE),
+            )
+        )
+
+    measurement_integrity_status, raw_control_status = _compute_control_health(control_records)
+    decision_payload = {
+        "raw_control_status": raw_control_status,
+        "measurement_integrity_status": measurement_integrity_status,
+        "control_decisions": _control_record_payload(control_records, measurement_integrity_status, raw_control_status),
+        "metric_policies": experiment.get(
+            "metric_policies",
+            {"version": METRIC_POLICIES_VERSION, "metric_policies": metric_policies_payload(METRIC_POLICIES)},
+        ),
+    }
+
+    recorded_decision = experiment.get("recorded_decision")
+    recorded_status = None
+    if isinstance(recorded_decision, dict):
+        recorded_status = recorded_decision.get("measurement_integrity_status")
+        status_match = recorded_status == measurement_integrity_status
+    else:
+        status_match = False
+
+    return {
+        "run": str(replay_bundle_path),
+        "status": measurement_integrity_status,
+        "measurement_integrity_status": measurement_integrity_status,
+        "raw_control_status": raw_control_status,
+        "recorded_status": recorded_status,
+        "status_match": status_match,
+        "recorded_decision": recorded_decision,
+        "control_records": control_records,
+        "decision": decision_payload,
+        "control_counts": {
+            "passed": len([item for item in control_records if item["decision"].get("status") == PASS]),
+            "failed": len([item for item in control_records if item["decision"].get("status") == FAIL]),
+            "inconclusive": len([item for item in control_records if item["decision"].get("status") == INCONCLUSIVE]),
+        },
+    }
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="neural-continuity")
     subparsers = parser.add_subparsers(dest="command")
     subparsers.required = True
+
     run = subparsers.add_parser("m0-run")
     run.add_argument("--config", required=True)
     run.add_argument("--output", default="runs")
+
+    replay = subparsers.add_parser("m0-replay")
+    replay.add_argument("--bundle", required=True)
     return parser
 
 
@@ -698,7 +1692,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     try:
-        summary = run_m0(config_path=Path(args.config), output_root=Path(args.output))
+        if args.command == "m0-run":
+            summary = run_m0(config_path=Path(args.config), output_root=Path(args.output))
+        else:
+            summary = run_m0_replay(replay_bundle_path=Path(args.bundle))
     except CommandError as exc:
         message = str(exc)
         if message.startswith("MODEL_UNAVAILABLE:"):
@@ -722,3 +1719,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

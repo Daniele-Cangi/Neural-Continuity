@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
+import shutil
 from pathlib import Path
 
 from neural_continuity.bootstrap import build_envelopes
-from neural_continuity.cli import REQUIRED_METRICS
+from neural_continuity.cli import REQUIRED_METRICS, run_m0, run_m0_replay
+import yaml
 from neural_continuity.datasets import (
     CandidateDocument,
     RetrievalFixture,
@@ -509,3 +512,65 @@ def test_bootstrap_observation_seed_is_used_for_stability():
         c1["metric_uncertainty"]["recall_at_1"]["seed"]
         == c2["metric_uncertainty"]["recall_at_1"]["seed"]
     )
+
+
+def _write_replay_config(tmp_path: Path) -> Path:
+    fixture_name = "local_retrieval_fixture.json"
+    fixture_copy = tmp_path / fixture_name
+    shutil.copyfile(FIXTURE_PATH, fixture_copy)
+
+    config = {
+        "experiment_name": "m0-replay-smoke",
+        "contract": "../contracts/m0-measurement-integrity-v1.json",
+        "model": {
+            "kind": "toy",
+            "dimension": 16,
+            "seed": 1729,
+        },
+        "dataset": {
+            "path": fixture_name,
+        },
+        "null": {
+            "repeats": 3,
+            "batch_sizes": [1],
+            "bootstrap_samples": 40,
+            "confidence_level": 0.99,
+            "random_seed": 2026,
+            "candidate_bootstrap_samples": 40,
+            "candidate_confidence_level": 0.99,
+        },
+        "runtime": {"topology_k": 5},
+        "controls": {
+            "exact_repeat": {
+                "enabled": True,
+                "repeats": 1,
+            },
+            "negative": {
+                "enabled": False,
+            },
+            "boundary": {
+                "enabled": False,
+            },
+        },
+    }
+    config_path = tmp_path / "m0-replay.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    return config_path
+
+
+def test_m0_replay_recomputes_matching_decision(tmp_path: Path):
+    config_path = _write_replay_config(tmp_path)
+    summary = run_m0(config_path=config_path, output_root=tmp_path / "runs")
+
+    replay_path = Path(summary["run_dir"]) / "replay-bundle.json"
+    assert replay_path.exists()
+
+    replay_bundle = json.loads(replay_path.read_text(encoding="utf-8"))
+    dataset_payload = replay_bundle.get("dataset")
+    assert isinstance(dataset_payload, dict)
+    assert "fixture_payload" in dataset_payload
+    assert "metric_policies" in replay_bundle.get("experiment", {})
+
+    replay = run_m0_replay(replay_bundle_path=replay_path)
+    assert replay["status_match"] is True
+    assert replay["measurement_integrity_status"] == summary["measurement_integrity_status"]

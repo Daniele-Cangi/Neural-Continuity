@@ -4,7 +4,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 
 @dataclass(frozen=True)
@@ -65,6 +65,23 @@ def _decode_query(raw: dict[str, Any]) -> RetrievalQuery:
             for doc in raw["candidate_documents"]
         ],
         relevant_document_ids=[str(rid) for rid in raw["relevant_document_ids"]],
+    )
+
+
+def fixture_payload(fixture: RetrievalFixture) -> dict[str, Any]:
+    return _canonical_payload(fixture)
+
+
+def fixture_from_payload(payload: Mapping[str, Any]) -> RetrievalFixture:
+    queries = payload.get("queries")
+    if not isinstance(queries, list) or not queries:
+        raise ValueError("fixture payload must include a non-empty query list")
+    decoded_queries = [_decode_query(query) for query in queries]
+    return RetrievalFixture(
+        fixture_id=str(payload.get("fixture_id", "")),
+        name=str(payload.get("name", "unnamed")),
+        description=str(payload.get("description", "")),
+        queries=decoded_queries,
     )
 
 

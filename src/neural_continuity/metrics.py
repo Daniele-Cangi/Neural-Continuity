@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, Literal
+from pathlib import Path
+import json
+from typing import Any, Literal, Mapping, Sequence
 
 import numpy as np
 from scipy.stats import spearmanr
@@ -57,7 +59,7 @@ METRIC_POLICIES: list[MetricPolicy] = [
         orientation="higher_is_better",
         may_block_promotion=True,
         minimum_null_observations=2,
-        minimum_candidate_sample_size=1,
+        minimum_candidate_sample_size=2,
         comparison_method="query_bootstrap",
     ),
     MetricPolicy(
@@ -93,7 +95,7 @@ METRIC_POLICIES: list[MetricPolicy] = [
         orientation="lower_is_better",
         may_block_promotion=False,
         minimum_null_observations=2,
-        minimum_candidate_sample_size=1,
+        minimum_candidate_sample_size=2,
         comparison_method="query_bootstrap",
     ),
     MetricPolicy(
@@ -102,7 +104,7 @@ METRIC_POLICIES: list[MetricPolicy] = [
         orientation="lower_is_better",
         may_block_promotion=False,
         minimum_null_observations=2,
-        minimum_candidate_sample_size=1,
+        minimum_candidate_sample_size=2,
         comparison_method="query_bootstrap",
     ),
     MetricPolicy(
@@ -111,13 +113,63 @@ METRIC_POLICIES: list[MetricPolicy] = [
         orientation="higher_is_better",
         may_block_promotion=False,
         minimum_null_observations=2,
-        minimum_candidate_sample_size=1,
+        minimum_candidate_sample_size=2,
         comparison_method="query_bootstrap",
     ),
 ]
 
 REQUIRED_METRICS = [policy.metric_id for policy in METRIC_POLICIES]
 POLICY_BY_ID = {policy.metric_id: policy for policy in METRIC_POLICIES}
+
+
+def load_metric_policies_from_mapping(mapping: Mapping[str, Any]) -> list[MetricPolicy]:
+    raw_policies = mapping.get("metric_policies")
+    if not isinstance(raw_policies, list):
+        raise ValueError("metric policies payload must include metric_policies list")
+
+    loaded: list[MetricPolicy] = []
+    for entry in raw_policies:
+        if not isinstance(entry, dict):
+            raise ValueError("invalid metric policy entry")
+        loaded.append(
+            MetricPolicy(
+                metric_id=str(entry["metric_id"]),
+                family=str(entry["family"]),
+                orientation=entry["orientation"],
+                may_block_promotion=bool(entry["may_block_promotion"]),
+                minimum_null_observations=int(entry["minimum_null_observations"]),
+                minimum_candidate_sample_size=int(entry["minimum_candidate_sample_size"]),
+                comparison_method=str(entry["comparison_method"]),
+            )
+        )
+    return loaded
+
+
+def load_metric_policies_from_path(path: Path) -> tuple[list[MetricPolicy], str]:
+    if not path.exists():
+        return METRIC_POLICIES, "1.0.0"
+    with path.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if not isinstance(payload, dict):
+        raise ValueError("metric policies payload must be a mapping")
+    policies = load_metric_policies_from_mapping(payload)
+    version = str(payload.get("version", "1.0.0"))
+    return policies, version
+
+
+def metric_policies_payload(policies: Sequence[MetricPolicy]) -> list[dict[str, Any]]:
+    return [
+        {
+            "metric_id": policy.metric_id,
+            "family": policy.family,
+            "orientation": policy.orientation,
+            "may_block_promotion": policy.may_block_promotion,
+            "minimum_null_observations": policy.minimum_null_observations,
+            "minimum_candidate_sample_size": policy.minimum_candidate_sample_size,
+            "comparison_method": policy.comparison_method,
+        }
+        for policy in policies
+    ]
 
 
 def _reciprocal_rank(ranking: list[str], relevant: list[str]) -> float:
@@ -135,7 +187,8 @@ def compute_functional_metrics(
     top_k_values: list[int],
 ) -> dict[str, Any]:
     relevant_by_query = {q.query_id: set(q.relevant_document_ids) for q in fixture.queries}
-    recall_hits = {k: 0 for k in top_k_values}
+    source_recall_hits = {k: 0 for k in top_k_values}
+    candidate_recall_hits = {k: 0 for k in top_k_values}
     source_rr_by_query: dict[str, float] = {}
     candidate_rr_by_query: dict[str, float] = {}
 
@@ -186,12 +239,18 @@ def compute_functional_metrics(
         candidate_top_at_5[qid] = candidate_recall_5
 
         for k in top_k_values:
+            if any(doc_id in relevant_by_query[qid] for doc_id in source_top[:k]):
+                source_recall_hits[k] += 1
             if any(doc_id in relevant_by_query[qid] for doc_id in candidate_top[:k]):
-                recall_hits[k] += 1
+                candidate_recall_hits[k] += 1
 
     query_count = len(fixture.queries)
-    source_recall = {f"recall_at_{k}": recall_hits[k] / query_count for k in top_k_values}
-    candidate_recall = {f"recall_at_{k}": recall_hits[k] / query_count for k in top_k_values}
+    source_recall = {
+        f"recall_at_{k}": source_recall_hits[k] / query_count for k in top_k_values
+    }
+    candidate_recall = {
+        f"recall_at_{k}": candidate_recall_hits[k] / query_count for k in top_k_values
+    }
 
     source_mean_rr = (
         float(np.mean(list(source_rr_by_query.values()))) if source_rr_by_query else 0.0
@@ -330,10 +389,10 @@ def _metric_value_pairs(
         )
     if policy.metric_id == "mean_reciprocal_rank":
         return (
-            [float(source_functional["source_mean_reciprocal_rank"])],
-            [float(candidate_functional["candidate_mean_reciprocal_rank"])],
-            {"single": float(source_functional["source_mean_reciprocal_rank"])},
-            {"single": float(candidate_functional["candidate_mean_reciprocal_rank"])},
+            [float(v) for v in source_functional["source_reciprocal_ranks"].values()],
+            [float(v) for v in candidate_functional["candidate_reciprocal_ranks"].values()],
+            source_functional["source_reciprocal_ranks"],
+            candidate_functional["candidate_reciprocal_ranks"],
         )
     if policy.metric_id == "paired_cosine_drift":
         return (

@@ -104,7 +104,7 @@ class SentenceTransformerModel:
                 with open(full_path, "rb") as handle:
                     for chunk in iter(lambda: handle.read(8192), b""):
                         hasher.update(chunk)
-                file_hashes.append({"path": name, "sha256": hasher.hexdigest()[:16]})
+                file_hashes.append({"path": name, "sha256": hasher.hexdigest()})
 
         return {
             "path": self.model_path,

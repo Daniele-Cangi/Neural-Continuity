@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 from typing import Any
 
 from . import FAIL, INCONCLUSIVE, PASS
@@ -59,6 +60,8 @@ def _interval_decision(
     observed_upper: float | None,
 ) -> tuple[str | None, dict[str, Any]]:
     if observed_lower is None or observed_upper is None:
+        return "insufficient_candidate_evidence", {"status": "insufficient"}
+    if math.isnan(envelope_lower) or math.isnan(envelope_upper):
         return "insufficient_candidate_evidence", {"status": "insufficient"}
 
     if policy.orientation == "higher_is_better":
@@ -120,6 +123,18 @@ def evaluate_comparison(
     uncertainty = comparison.get("metric_uncertainty", {})
     policies = _policy_lookup(required, metric_policies)
 
+    for regression in comparison.get("regressions", {}).get("source_correct_candidate_wrong", []):
+        reasons.append(
+            DecisionReason(
+                category="frozen_set_regression",
+                metric="source_correct_candidate_wrong",
+                message="Primary regression detected: source correct / candidate wrong.",
+                affected_sample_ids=[str(regression)],
+            )
+        )
+    if any(r.category == "frozen_set_regression" for r in reasons):
+        return ContinuityDecision(status=FAIL, reasons=reasons)
+
     missing = [metric for metric in required if metric not in metric_deltas]
     if missing:
         reasons.append(
@@ -134,6 +149,14 @@ def evaluate_comparison(
     for metric in required:
         policy = policies.get(metric)
         if policy is None:
+            reasons.append(
+                DecisionReason(
+                    category="missing_metric_policy",
+                    metric=metric,
+                    message="No policy configured for required metric.",
+                    details={"metric": metric},
+                )
+            )
             continue
 
         envelope = envelopes.get(metric)
@@ -147,6 +170,7 @@ def evaluate_comparison(
                 )
             )
             continue
+
         if envelope.get("status") != "complete":
             reasons.append(
                 DecisionReason(
@@ -173,12 +197,92 @@ def evaluate_comparison(
             )
             continue
 
+        candidate_interval = (
+            metric_uncertainty.get("lower_bound"),
+            metric_uncertainty.get("upper_bound"),
+        )
+        source_intervals = envelope.get("source_envelopes")
+        checked_source = False
+        has_complete_source = False
+        has_incomplete_source = False
+
+        if isinstance(source_intervals, dict) and source_intervals:
+            for source_name, source_envelope in source_intervals.items():
+                if not isinstance(source_envelope, dict):
+                    continue
+                checked_source = True
+                if source_envelope.get("status") != "complete":
+                    has_incomplete_source = True
+                    continue
+                has_complete_source = True
+                category, detail = _interval_decision(
+                    policy=policy,
+                    envelope_lower=float(source_envelope.get("lower_bound", math.nan)),
+                    envelope_upper=float(source_envelope.get("upper_bound", math.nan)),
+                    observed_lower=candidate_interval[0],
+                    observed_upper=candidate_interval[1],
+                )
+                if category is not None:
+                    reasons.append(
+                        DecisionReason(
+                            category=category,
+                            metric=metric,
+                            message=(
+                                "metric interval "
+                                f"[{candidate_interval[0]}, "
+                                f"{candidate_interval[1]}] "
+                                "is not fully inside source-specific null interval "
+                                f"[{source_envelope.get('lower_bound')}, "
+                                f"{source_envelope.get('upper_bound')}] "
+                                f"({source_name})."
+                            ),
+                            details={
+                                "noise_source": source_name,
+                                "null_interval": [
+                                    source_envelope.get("lower_bound"),
+                                    source_envelope.get("upper_bound"),
+                                ],
+                                "candidate_interval": [
+                                    candidate_interval[0],
+                                    candidate_interval[1],
+                                ],
+                                "interval_detail": detail,
+                                "policy": {
+                                    "metric_id": metric,
+                                    "may_block_promotion": policy.may_block_promotion,
+                                    "minimum_candidate_sample_size": policy.minimum_candidate_sample_size,
+                                    "minimum_null_observations": policy.minimum_null_observations,
+                                },
+                            },
+                        )
+                    )
+
+            if checked_source:
+                if has_incomplete_source:
+                    reasons.append(
+                        DecisionReason(
+                            category="insufficient_null_evidence",
+                            metric=metric,
+                            message=(
+                                "Some noise sources are missing complete null envelopes for this metric."
+                            ),
+                            details={
+                                "noise_source_counts": envelope.get("noise_source_counts"),
+                                "source_bounds": envelope.get("details", {}).get(
+                                    "source_bounds", {}
+                                ),
+                            },
+                        )
+                    )
+                if has_complete_source or has_incomplete_source:
+                    continue
+
         category, detail = _interval_decision(
             policy=policy,
-            envelope_lower=float(envelope.get("lower_bound", float("nan"))),
-            envelope_upper=float(envelope.get("upper_bound", float("nan"))),
-            observed_lower=metric_uncertainty.get("lower_bound"),
-            observed_upper=metric_uncertainty.get("upper_bound"),
+            envelope_lower=float(envelope.get("lower_bound", math.nan)),
+            envelope_upper=float(envelope.get("upper_bound", math.nan)),
+            observed_lower=candidate_interval[0],
+            observed_upper=candidate_interval[1],
         )
         if category is None:
             continue
@@ -189,17 +293,14 @@ def evaluate_comparison(
                 metric=metric,
                 message=(
                     "metric interval "
-                    f"[{metric_uncertainty.get('lower_bound')}, "
-                    f"{metric_uncertainty.get('upper_bound')}] "
+                    f"[{candidate_interval[0]}, "
+                    f"{candidate_interval[1]}] "
                     f"is not fully inside null interval "
                     f"[{envelope.get('lower_bound')}, {envelope.get('upper_bound')}]."
                 ),
                 details={
                     "null_interval": [envelope.get("lower_bound"), envelope.get("upper_bound")],
-                    "candidate_interval": [
-                        metric_uncertainty.get("lower_bound"),
-                        metric_uncertainty.get("upper_bound"),
-                    ],
+                    "candidate_interval": [candidate_interval[0], candidate_interval[1]],
                     "interval_detail": detail,
                     "policy": {
                         "metric_id": metric,
@@ -229,19 +330,6 @@ def evaluate_comparison(
     if hard_boundary_overlap:
         return ContinuityDecision(status=INCONCLUSIVE, reasons=reasons)
     if hard_outside:
-        return ContinuityDecision(status=FAIL, reasons=reasons)
-
-    for regression in comparison.get("regressions", {}).get("source_correct_candidate_wrong", []):
-        reasons.append(
-            DecisionReason(
-                category="frozen_set_regression",
-                metric="source_correct_candidate_wrong",
-                message="Primary regression detected: source correct / candidate wrong.",
-                affected_sample_ids=[regression],
-            )
-        )
-
-    if any(r.category == "frozen_set_regression" for r in reasons):
         return ContinuityDecision(status=FAIL, reasons=reasons)
 
     return ContinuityDecision(status=PASS, reasons=reasons)
