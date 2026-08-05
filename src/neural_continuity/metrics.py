@@ -366,6 +366,22 @@ def compute_system_metrics(
     }
 
 
+def _aligned_metric_series(
+    source_series: Mapping[str, Any], candidate_series: Mapping[str, Any]
+) -> tuple[list[float], list[float], dict[str, float], dict[str, float]]:
+    if set(source_series) != set(candidate_series):
+        raise ValueError("source and candidate metric query identities must match")
+    query_ids = sorted(source_series)
+    ordered_source = {query_id: float(source_series[query_id]) for query_id in query_ids}
+    ordered_candidate = {query_id: float(candidate_series[query_id]) for query_id in query_ids}
+    return (
+        list(ordered_source.values()),
+        list(ordered_candidate.values()),
+        ordered_source,
+        ordered_candidate,
+    )
+
+
 def _metric_value_pairs(
     source_functional: dict[str, Any],
     candidate_functional: dict[str, Any],
@@ -376,44 +392,32 @@ def _metric_value_pairs(
     policy: MetricPolicy,
 ) -> tuple[list[float], list[float], dict[str, float], dict[str, float]]:
     if policy.metric_id == "recall_at_1":
-        return (
-            [float(v) for v in source_functional["source_recall_by_query_at_1"].values()],
-            [float(v) for v in candidate_functional["candidate_recall_by_query_at_1"].values()],
+        return _aligned_metric_series(
             source_functional["source_recall_by_query_at_1"],
             candidate_functional["candidate_recall_by_query_at_1"],
         )
     if policy.metric_id == "recall_at_5":
-        return (
-            [float(v) for v in source_functional["source_recall_by_query_at_5"].values()],
-            [float(v) for v in candidate_functional["candidate_recall_by_query_at_5"].values()],
+        return _aligned_metric_series(
             source_functional["source_recall_by_query_at_5"],
             candidate_functional["candidate_recall_by_query_at_5"],
         )
     if policy.metric_id == "mean_reciprocal_rank":
-        return (
-            [float(v) for v in source_functional["source_reciprocal_ranks"].values()],
-            [float(v) for v in candidate_functional["candidate_reciprocal_ranks"].values()],
+        return _aligned_metric_series(
             source_functional["source_reciprocal_ranks"],
             candidate_functional["candidate_reciprocal_ranks"],
         )
     if policy.metric_id == "paired_cosine_drift":
-        return (
-            [float(v) for v in source_topology["per_query_drift"].values()],
-            [float(v) for v in candidate_topology["per_query_drift"].values()],
+        return _aligned_metric_series(
             source_topology["per_query_drift"],
             candidate_topology["per_query_drift"],
         )
     if policy.metric_id == "nearest_neighbour_overlap_at_k":
-        return (
-            [float(v) for v in source_topology["per_query_overlap"].values()],
-            [float(v) for v in candidate_topology["per_query_overlap"].values()],
+        return _aligned_metric_series(
             source_topology["per_query_overlap"],
             candidate_topology["per_query_overlap"],
         )
     if policy.metric_id == "rank_correlation":
-        return (
-            [float(v) for v in source_topology["per_query_rank_correlation"].values()],
-            [float(v) for v in candidate_topology["per_query_rank_correlation"].values()],
+        return _aligned_metric_series(
             source_topology["per_query_rank_correlation"],
             candidate_topology["per_query_rank_correlation"],
         )

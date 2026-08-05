@@ -11,6 +11,8 @@ from typing import Any
 
 from .observations import ModelObservation, observation_to_manifest
 
+REPLAY_BUNDLE_FORMAT_VERSION = "2.0.0"
+
 
 def canonical_json_bytes(payload: Mapping[str, Any] | list[Any]) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
@@ -126,7 +128,7 @@ def save_replay_bundle(
     config: Mapping[str, Any],
 ) -> str:
     payload = {
-        "format_version": "1.0.0",
+        "format_version": REPLAY_BUNDLE_FORMAT_VERSION,
         "dataset": dict(dataset_identity),
         "observations": [observation_to_manifest(observation) for observation in observations],
         "experiment": dict(config),

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import time
 import uuid
 from pathlib import Path
@@ -21,6 +22,7 @@ from .datasets import (
 )
 from .decisions import evaluate_comparison
 from .evidence import (
+    REPLAY_BUNDLE_FORMAT_VERSION,
     build_environment_manifest,
     canonical_json_bytes,
     get_git_commit_sha,
@@ -42,7 +44,9 @@ from .models import PerturbedModel, SentenceTransformerModel, ToyEmbeddingModel
 from .observations import (
     ModelObservation,
     evaluate_model,
+    load_raw_observation_rows_parquet,
     observation_from_manifest,
+    observation_to_rows,
     save_raw_observations_parquet,
 )
 from .perturbations import perturbation_from_config
@@ -1360,8 +1364,307 @@ def _verify_embedded_artifact_coherence(
             )
 
 
+_COMPARISON_SEMANTIC_FIELDS = (
+    "source",
+    "candidate",
+    "source_metrics",
+    "candidate_metrics",
+    "functional",
+    "topology",
+    "system",
+    "metric_deltas",
+    "metric_uncertainty",
+    "regressions",
+    "changed_nearest_neighbours",
+    "affected_samples",
+    "metric_policies",
+    "sample_count",
+)
+
+
+def _comparison_semantic_view(payload: Any, *, location: str) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ReplayEvidenceError(
+            "ARTIFACT_SEMANTIC_COHERENCE_ERROR",
+            f"comparison evidence is not an object: {location}",
+        )
+    missing = [field for field in _COMPARISON_SEMANTIC_FIELDS if field not in payload]
+    if missing:
+        raise ReplayEvidenceError(
+            "ARTIFACT_SEMANTIC_COHERENCE_ERROR",
+            f"comparison evidence is incomplete at {location}: {missing}",
+        )
+    return {field: payload[field] for field in _COMPARISON_SEMANTIC_FIELDS}
+
+
+def _require_semantic_match(
+    recorded: Any, recomputed: Any, *, artifact_name: str, location: str
+) -> None:
+    if not _semantic_values_equal(recorded, recomputed):
+        raise ReplayEvidenceError(
+            "ARTIFACT_SEMANTIC_COHERENCE_ERROR",
+            f"recomputed evidence differs from {artifact_name} at {location}",
+        )
+
+
+def _semantic_values_equal(recorded: Any, recomputed: Any) -> bool:
+    if isinstance(recorded, bool) or isinstance(recomputed, bool):
+        return type(recorded) is type(recomputed) and recorded == recomputed
+    if isinstance(recorded, int | float) and isinstance(recomputed, int | float):
+        return math.isclose(
+            float(recorded),
+            float(recomputed),
+            rel_tol=1e-12,
+            abs_tol=1e-12,
+        )
+    if isinstance(recorded, dict) and isinstance(recomputed, dict):
+        return set(recorded) == set(recomputed) and all(
+            _semantic_values_equal(recorded[key], recomputed[key]) for key in recorded
+        )
+    if isinstance(recorded, list) and isinstance(recomputed, list):
+        return len(recorded) == len(recomputed) and all(
+            _semantic_values_equal(left, right)
+            for left, right in zip(recorded, recomputed, strict=False)
+        )
+    return type(recorded) is type(recomputed) and recorded == recomputed
+
+
+def _verify_raw_observation_semantics(
+    artifact_bytes: dict[str, bytes], observations: list[ModelObservation]
+) -> None:
+    parquet_bytes = artifact_bytes.get("raw-observations.parquet")
+    if parquet_bytes is None:
+        raise ReplayEvidenceError(
+            "DECLARED_ARTIFACT_MISSING",
+            "artifact manifest must declare raw-observations.parquet",
+        )
+    expected_rows: list[dict[str, Any]] = []
+    for observation in observations:
+        expected_rows.extend(observation_to_rows(observation))
+    expected_rows.sort(
+        key=lambda row: (
+            row["run_id"],
+            row["run_label"],
+            row["query_id"],
+            row["rank"],
+            row["doc_id"],
+        )
+    )
+    try:
+        recorded_rows = load_raw_observation_rows_parquet(parquet_bytes)
+    except ValueError as exc:
+        raise ReplayEvidenceError("ARTIFACT_SEMANTIC_COHERENCE_ERROR", str(exc)) from exc
+    _require_semantic_match(
+        recorded_rows,
+        expected_rows,
+        artifact_name="raw-observations.parquet",
+        location="ranked observation rows",
+    )
+
+
+def _verify_recomputed_report_semantics(
+    *,
+    artifact_bytes: dict[str, bytes],
+    experiment: dict[str, Any],
+    null_settings: dict[str, Any],
+    null_comparisons: list[dict[str, Any]],
+    exact_recomputed: list[dict[str, Any]],
+    negative_recomputed: dict[str, Any] | None,
+    boundary_recomputed: dict[str, Any] | None,
+    boundary_plan: dict[str, Any],
+) -> None:
+    noise_bytes = artifact_bytes.get("noise-envelope.json")
+    report_bytes = artifact_bytes.get("comparison-report.json")
+    if noise_bytes is None or report_bytes is None:
+        missing = "noise-envelope.json" if noise_bytes is None else "comparison-report.json"
+        raise ReplayEvidenceError(
+            "DECLARED_ARTIFACT_MISSING", f"artifact manifest must declare {missing}"
+        )
+    noise = _load_json_object_bytes(
+        noise_bytes,
+        artifact_name="noise-envelope.json",
+        reason_code="ARTIFACT_SEMANTIC_COHERENCE_ERROR",
+    )
+    report = _load_json_object_bytes(
+        report_bytes,
+        artifact_name="comparison-report.json",
+        reason_code="ARTIFACT_SEMANTIC_COHERENCE_ERROR",
+    )
+
+    expected_envelope_config = {
+        "bootstrap_samples": int(null_settings.get("bootstrap_samples", 500)),
+        "confidence_level": float(null_settings.get("confidence_level", 0.99)),
+        "random_seed": int(null_settings.get("random_seed", 17)),
+    }
+    expected_metric_policies = experiment.get(
+        "metric_policies",
+        {
+            "version": METRIC_POLICIES_VERSION,
+            "metric_policies": metric_policies_payload(METRIC_POLICIES),
+        },
+    )
+    _require_semantic_match(
+        noise.get("envelope_config"),
+        expected_envelope_config,
+        artifact_name="noise-envelope.json",
+        location="envelope_config",
+    )
+    _require_semantic_match(
+        noise.get("metric_policies"),
+        expected_metric_policies,
+        artifact_name="noise-envelope.json",
+        location="metric_policies",
+    )
+    recorded_null = noise.get("comparisons")
+    if not isinstance(recorded_null, list) or len(recorded_null) != len(null_comparisons):
+        raise ReplayEvidenceError(
+            "ARTIFACT_SEMANTIC_COHERENCE_ERROR",
+            "null comparison count differs from noise-envelope.json",
+        )
+    for index, (recorded, recomputed) in enumerate(
+        zip(recorded_null, null_comparisons, strict=False)
+    ):
+        _require_semantic_match(
+            _comparison_semantic_view(recorded, location=f"null[{index}]"),
+            _comparison_semantic_view(recomputed, location=f"recomputed null[{index}]"),
+            artifact_name="noise-envelope.json",
+            location=f"comparisons[{index}]",
+        )
+
+    _require_semantic_match(
+        report.get("null"),
+        noise,
+        artifact_name="comparison-report.json",
+        location="null",
+    )
+    exact_section = report.get("exact_repeat")
+    if not isinstance(exact_section, dict):
+        raise ReplayEvidenceError(
+            "ARTIFACT_SEMANTIC_COHERENCE_ERROR",
+            "comparison-report.json exact_repeat section is invalid",
+        )
+    recorded_exact = exact_section.get("comparisons")
+    if not isinstance(recorded_exact, list) or len(recorded_exact) != len(exact_recomputed):
+        raise ReplayEvidenceError(
+            "ARTIFACT_SEMANTIC_COHERENCE_ERROR",
+            "exact-repeat comparison count differs from comparison-report.json",
+        )
+    _require_semantic_match(
+        exact_section.get("enabled"),
+        bool(exact_recomputed),
+        artifact_name="comparison-report.json",
+        location="exact_repeat.enabled",
+    )
+    for index, (recorded, recomputed) in enumerate(
+        zip(recorded_exact, exact_recomputed, strict=False)
+    ):
+        _require_semantic_match(
+            _comparison_semantic_view(
+                recorded.get("comparison"), location=f"exact_repeat[{index}]"
+            ),
+            _comparison_semantic_view(
+                recomputed["comparison"], location=f"recomputed exact_repeat[{index}]"
+            ),
+            artifact_name="comparison-report.json",
+            location=f"exact_repeat.comparisons[{index}]",
+        )
+        _require_semantic_match(
+            recorded.get("decision"),
+            recomputed["decision"],
+            artifact_name="comparison-report.json",
+            location=f"exact_repeat.comparisons[{index}].decision",
+        )
+        _require_semantic_match(
+            recorded.get("expected_status"),
+            PASS,
+            artifact_name="comparison-report.json",
+            location=f"exact_repeat.comparisons[{index}].expected_status",
+        )
+
+    negative_section = report.get("negative")
+    if negative_recomputed is None:
+        _require_semantic_match(
+            negative_section,
+            {"enabled": False},
+            artifact_name="comparison-report.json",
+            location="negative",
+        )
+    else:
+        if not isinstance(negative_section, dict):
+            raise ReplayEvidenceError(
+                "ARTIFACT_SEMANTIC_COHERENCE_ERROR",
+                "comparison-report.json negative section is invalid",
+            )
+        _require_semantic_match(
+            _comparison_semantic_view(negative_section.get("comparison"), location="negative"),
+            _comparison_semantic_view(
+                negative_recomputed["comparison"], location="recomputed negative"
+            ),
+            artifact_name="comparison-report.json",
+            location="negative.comparison",
+        )
+        for key, expected in (
+            ("enabled", True),
+            ("expected_status", FAIL),
+            ("decision", negative_recomputed["decision"]),
+        ):
+            _require_semantic_match(
+                negative_section.get(key),
+                expected,
+                artifact_name="comparison-report.json",
+                location=f"negative.{key}",
+            )
+
+    boundary_section = report.get("boundary")
+    if boundary_recomputed is None:
+        _require_semantic_match(
+            boundary_section,
+            {"enabled": False},
+            artifact_name="comparison-report.json",
+            location="boundary",
+        )
+    else:
+        if not isinstance(boundary_section, dict):
+            raise ReplayEvidenceError(
+                "ARTIFACT_SEMANTIC_COHERENCE_ERROR",
+                "comparison-report.json boundary section is invalid",
+            )
+        _require_semantic_match(
+            _comparison_semantic_view(boundary_section.get("comparison"), location="boundary"),
+            _comparison_semantic_view(
+                boundary_recomputed["comparison"], location="recomputed boundary"
+            ),
+            artifact_name="comparison-report.json",
+            location="boundary.comparison",
+        )
+        boundary_expectations = {
+            "enabled": True,
+            "expected_status": INCONCLUSIVE,
+            "decision": boundary_recomputed["decision"],
+            "attempts": boundary_plan.get("attempts", []),
+            "selected_attempt": boundary_plan.get("selected_attempt"),
+            "attempt_count": boundary_plan.get("attempt_count"),
+            "crossing_detected": boundary_plan.get("crossing_detected", False),
+            "crossing_point": boundary_plan.get("crossing_point", {}),
+        }
+        for key, expected in boundary_expectations.items():
+            _require_semantic_match(
+                boundary_section.get(key),
+                expected,
+                artifact_name="comparison-report.json",
+                location=f"boundary.{key}",
+            )
+
+
 def run_m0_replay(replay_bundle_path: Path, output_root: Path | None = None) -> dict[str, Any]:
     payload, artifact_integrity, artifact_bytes = _load_replay_bundle(Path(replay_bundle_path))
+    format_version = payload.get("format_version")
+    if format_version != REPLAY_BUNDLE_FORMAT_VERSION:
+        raise ReplayEvidenceError(
+            "REPLAY_FORMAT_VERSION_UNSUPPORTED",
+            "authoritative replay requires format_version="
+            f"{REPLAY_BUNDLE_FORMAT_VERSION}; received {format_version!r}",
+        )
     _verify_embedded_artifact_coherence(payload, artifact_bytes)
     dataset = payload.get("dataset")
     if not isinstance(dataset, dict):
@@ -1522,7 +1825,7 @@ def run_m0_replay(replay_bundle_path: Path, output_root: Path | None = None) -> 
             fixture=fixture,
             topology_k=topology_k,
             metric_bootstrap_samples=metric_bootstrap_samples,
-            metric_bootstrap_seed=metric_bootstrap_seed + idx,
+            metric_bootstrap_seed=int(item.get("seed", metric_bootstrap_seed + idx)),
             confidence_level=float(item.get("confidence_level", candidate_confidence_level)),
             metric_policies=metric_policies,
         )
@@ -1532,6 +1835,7 @@ def run_m0_replay(replay_bundle_path: Path, output_root: Path | None = None) -> 
         comparison["batch_size"] = item.get("batch_size", obs.batch_size)
         comparison["sample_count"] = len(fixture.queries)
         comparison["noise_source"] = item.get("noise_source", "unknown")
+        comparison["runtime_hardware"] = obs.system_metrics.get("hardware")
         null_comparisons.append(comparison)
 
     null_settings = control_plan.get("null_settings", {})
@@ -1544,6 +1848,9 @@ def run_m0_replay(replay_bundle_path: Path, output_root: Path | None = None) -> 
     )
 
     control_records: list[dict[str, Any]] = []
+    exact_recomputed: list[dict[str, Any]] = []
+    negative_recomputed: dict[str, Any] | None = None
+    boundary_recomputed: dict[str, Any] | None = None
     for idx, row in enumerate(exact_repeat_plan):
         if not row["enabled"]:
             continue
@@ -1578,11 +1885,13 @@ def run_m0_replay(replay_bundle_path: Path, output_root: Path | None = None) -> 
             required_metrics=required_metrics,
             metric_policies=metric_policies,
         )
+        exact_decision = decision.as_dict()
+        exact_recomputed.append({"comparison": comparison, "decision": exact_decision})
         control_records.append(
             _control_record(
                 control="exact_repeat",
                 control_name=label,
-                decision=decision.as_dict(),
+                decision=exact_decision,
                 comparison=comparison,
                 enabled=True,
                 expected_status=CONTROL_EXPECTED_STATUS["exact_repeat"],
@@ -1622,11 +1931,16 @@ def run_m0_replay(replay_bundle_path: Path, output_root: Path | None = None) -> 
                 required_metrics=required_metrics,
                 metric_policies=metric_policies,
             )
+            negative_decision = decision.as_dict()
+            negative_recomputed = {
+                "comparison": comparison,
+                "decision": negative_decision,
+            }
             control_records.append(
                 _control_record(
                     control="negative",
                     control_name=negative_label,
-                    decision=decision.as_dict(),
+                    decision=negative_decision,
                     comparison=comparison,
                     enabled=True,
                     expected_status=CONTROL_EXPECTED_STATUS["negative"],
@@ -1694,6 +2008,10 @@ def run_m0_replay(replay_bundle_path: Path, output_root: Path | None = None) -> 
                     }
             else:
                 boundary_decision = decision.as_dict()
+            boundary_recomputed = {
+                "comparison": comparison,
+                "decision": boundary_decision,
+            }
             control_records.append(
                 _control_record(
                     control="boundary",
@@ -1734,6 +2052,17 @@ def run_m0_replay(replay_bundle_path: Path, output_root: Path | None = None) -> 
         ),
         "boundary_evidence": boundary_plan,
     }
+    _verify_raw_observation_semantics(artifact_bytes, observations)
+    _verify_recomputed_report_semantics(
+        artifact_bytes=artifact_bytes,
+        experiment=experiment,
+        null_settings=null_settings,
+        null_comparisons=null_comparisons,
+        exact_recomputed=exact_recomputed,
+        negative_recomputed=negative_recomputed,
+        boundary_recomputed=boundary_recomputed,
+        boundary_plan=boundary_plan,
+    )
 
     recorded_decision = experiment.get("recorded_decision")
     if not isinstance(recorded_decision, dict):

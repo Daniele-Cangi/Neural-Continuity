@@ -5,6 +5,7 @@ import json
 import shutil
 from pathlib import Path
 
+import pandas as pd
 import pytest
 import yaml
 
@@ -587,6 +588,14 @@ def _rewrite_json_artifact(run_dir: Path, artifact_name: str, payload: dict) -> 
     return artifact_path
 
 
+def _rehash_artifact(run_dir: Path, artifact_name: str) -> None:
+    artifact_path = run_dir / artifact_name
+    manifest_path = run_dir / "artifact-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"][artifact_name] = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+
 def test_m0_replay_recomputes_matching_decision(tmp_path: Path):
     config_path = _write_replay_config(tmp_path)
     summary = run_m0(config_path=config_path, output_root=tmp_path / "runs")
@@ -776,3 +785,50 @@ def test_m0_replay_mismatch_is_execution_error_and_nonzero_exit(tmp_path: Path, 
     payload = json.loads(capsys.readouterr().out)
     assert payload["execution_status"] == "EXECUTION_ERROR"
     assert payload["reason_code"] == "REPLAY_DECISION_MISMATCH"
+
+
+def test_m0_replay_rejects_legacy_format_as_non_authoritative(tmp_path: Path):
+    config_path = _write_replay_config(tmp_path)
+    summary = run_m0(config_path=config_path, output_root=tmp_path / "runs")
+    run_dir = Path(summary["run_dir"])
+    replay_path = run_dir / "replay-bundle.json"
+    replay_bundle = json.loads(replay_path.read_text(encoding="utf-8"))
+    replay_bundle["format_version"] = "1.0.0"
+    replay_path = _rewrite_json_artifact(run_dir, "replay-bundle.json", replay_bundle)
+
+    with pytest.raises(ReplayEvidenceError) as exc:
+        run_m0_replay(replay_path)
+    assert exc.value.reason_code == "REPLAY_FORMAT_VERSION_UNSUPPORTED"
+
+
+def test_m0_replay_rejects_parquet_semantic_mismatch(tmp_path: Path):
+    config_path = _write_replay_config(tmp_path)
+    summary = run_m0(config_path=config_path, output_root=tmp_path / "runs")
+    run_dir = Path(summary["run_dir"])
+    parquet_path = run_dir / "raw-observations.parquet"
+    frame = pd.read_parquet(parquet_path)
+    frame.loc[0, "score"] = float(frame.loc[0, "score"]) + 0.25
+    frame.to_parquet(parquet_path, index=False)
+    _rehash_artifact(run_dir, "raw-observations.parquet")
+
+    with pytest.raises(ReplayEvidenceError) as exc:
+        run_m0_replay(run_dir / "replay-bundle.json")
+    assert exc.value.reason_code == "ARTIFACT_SEMANTIC_COHERENCE_ERROR"
+
+
+@pytest.mark.parametrize("artifact_name", ["noise-envelope.json", "comparison-report.json"])
+def test_m0_replay_rejects_recomputed_report_mismatch(tmp_path: Path, artifact_name: str):
+    config_path = _write_replay_config(tmp_path)
+    summary = run_m0(config_path=config_path, output_root=tmp_path / "runs")
+    run_dir = Path(summary["run_dir"])
+    artifact_path = run_dir / artifact_name
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    if artifact_name == "noise-envelope.json":
+        artifact["comparisons"][0]["candidate_metrics"]["recall_at_1"] += 0.25
+    else:
+        artifact["negative"]["decision"]["status"] = "PASS"
+    _rewrite_json_artifact(run_dir, artifact_name, artifact)
+
+    with pytest.raises(ReplayEvidenceError) as exc:
+        run_m0_replay(run_dir / "replay-bundle.json")
+    assert exc.value.reason_code == "ARTIFACT_SEMANTIC_COHERENCE_ERROR"
