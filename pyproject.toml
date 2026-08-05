@@ -26,6 +26,7 @@ dev = ["ruff>=0.6", "black>=24.0", "mypy>=1.10"]
 
 [project.scripts]
 neural-continuity = "neural_continuity.cli:main"
+neural-continuity-materialize = "neural_continuity.dataset_materialization:main"
 
 [project.urls]
 Homepage = "https://example.com/neural-continuity"

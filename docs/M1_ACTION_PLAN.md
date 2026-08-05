@@ -78,6 +78,10 @@ Il preflight sintetico può verificare solo plumbing e non produce evidence qual
 
 Il fixture a 5 query rimane fixture di plumbing e non deve diventare training/evidenza definitiva.
 
+Il protocollo dati autoritativo e `docs/M1_DATASET_PROTOCOL.md`; lo snapshot e il
+partizionamento sono congelati in `experiments/m1-scifact-v1.manifest.json`. Lo stato
+iniziale `specified_not_materialized` non costituisce evidence qualificante.
+
 Struttura dataset proposta:
 
 - split `measurement_null` (stima della variabilità e del rumore dello strumento);
@@ -344,7 +348,7 @@ Vedi sezione 12.
 
 ### Unresolved concrete decisions
 
-- distinzione tra `synthetic preflight` e `real teacher qualification`.
+- materializzazione e audit fail-closed dello snapshot SciFact v1 congelato;
 - provider ONNX prioritario in ambiente CPU-only;
 - schema finale di `acceptance contract` (numeri e famiglie);
 - soglia hardware per promozione transizione INT8.
