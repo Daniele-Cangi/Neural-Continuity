@@ -46,6 +46,32 @@ def _make_fake_sentence_transformers_model(monkeypatch, *, model_path: Path, out
         def __init__(self) -> None:
             self.model_max_length = 16
             self.config = {"name_or_path": "stub-tokenizer"}
+            self.backend_tokenizer = types.SimpleNamespace(
+                to_str=lambda: json.dumps(
+                    {"model": {"type": "WordPiece"}, "normalizer": {"lowercase": True}}
+                )
+            )
+
+    class FakeTransformerModule:
+        auto_model = types.SimpleNamespace(config=types.SimpleNamespace(_commit_hash="a" * 40))
+
+        @staticmethod
+        def get_config_dict():
+            return {"max_seq_length": 16, "do_lower_case": True}
+
+    class FakePooling:
+        @staticmethod
+        def get_config_dict():
+            return {
+                "embedding_dimension": 4,
+                "pooling_mode": "mean",
+                "include_prompt": True,
+            }
+
+    class FakeNormalize:
+        @staticmethod
+        def get_config_dict():
+            return {}
 
     class FakeSentenceTransformer:
         def __init__(
@@ -70,6 +96,11 @@ def _make_fake_sentence_transformers_model(monkeypatch, *, model_path: Path, out
             self.auto_model = types.SimpleNamespace(
                 config=types.SimpleNamespace(_commit_hash="a" * 40)
             )
+            self._modules = {
+                "0": FakeTransformerModule(),
+                "1": FakePooling(),
+                "2": FakeNormalize(),
+            }
 
         def eval(self):
             self._eval_called = True
@@ -96,7 +127,11 @@ def _write_teacher_config(tmp_path: Path) -> Path:
     fixture_copy.write_text(fixture_src.read_text(encoding="utf-8"), encoding="utf-8")
 
     config = {
-        "experiment_name": "M1_REAL_TEACHER_QUALIFICATION",
+        "experiment_name": "M1_REAL_TEACHER_OBSERVATION_PREFLIGHT",
+        "evidence_scope": {
+            "classification": "real_teacher_plumbing_preflight",
+            "qualifying_m1_evidence": False,
+        },
         "contract": str(repo_root / "contracts" / "m0-measurement-integrity-v1.json"),
         "model": {
             "kind": "sentence-transformers",
@@ -229,6 +264,25 @@ def test_sentence_transformer_dependency_classification_missing_torch(
         SentenceTransformerModel(model_id="sentence-transformers/all-MiniLM-L6-v2")
 
 
+@pytest.mark.parametrize(
+    "dependency", ["transformers", "tokenizers", "huggingface_hub", "safetensors"]
+)
+def test_sentence_transformer_dependency_classification_missing_transitive_dependency(
+    monkeypatch, dependency: str
+) -> None:
+    monkeypatch.setattr(models, "_package_available", lambda name: True)
+    original_import = models.builtins.__import__
+
+    def _import(name: str, *args, **kwargs):
+        if name == "sentence_transformers":
+            raise ModuleNotFoundError(f"No module named '{dependency}'", name=dependency)
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(models.builtins, "__import__", _import)
+    with pytest.raises(RuntimeError, match=rf"teacher_dependency_unavailable:{dependency}"):
+        SentenceTransformerModel(model_id="sentence-transformers/all-MiniLM-L6-v2")
+
+
 def test_sentence_transformer_dependency_classification_missing_cache(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -327,10 +381,40 @@ def test_sentence_transformer_manifest_records_explicit_controls_and_cache(
     assert manifest["requested_device"] == "cpu"
     assert manifest["resolved_device"] == "cpu"
     assert manifest["normalize_embeddings"] is False
+    assert manifest["encode_normalize_embeddings"] is False
+    assert manifest["pipeline_normalizes_embeddings"] is True
+    assert manifest["effective_normalization"] is True
     assert manifest["output_dtype"] == "float32"
     assert manifest["max_sequence_length"] == 42
     assert manifest["evaluation_mode"] is True
+    assert manifest["pooling_configuration"]["configuration"]["pooling_mode"] == "mean"
+    assert manifest["pooling_configuration"]["configuration"]["include_prompt"] is True
+    assert len(manifest["tokenizer_configuration_sha256"]) == 64
+    assert [module["semantic_role"] for module in manifest["pipeline_modules"][1:]] == [
+        "pooling",
+        "embedding_normalization",
+    ]
     assert model._model.max_seq_length == 42
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("normalize_embeddings", "false", "must be a boolean"),
+        ("cache_only", "true", "must be a boolean"),
+        ("max_sequence_length", 128.5, "must be a positive integer"),
+    ],
+)
+def test_teacher_config_rejects_ambiguous_preprocessing_values(
+    monkeypatch, tmp_path: Path, field: str, value: object, message: str
+) -> None:
+    config_path = _write_teacher_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["model"][field] = value
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match=message):
+        run_m0(config_path=config_path, output_root=tmp_path / "runs")
 
 
 def test_sentence_transformer_manifest_has_full_inventory_and_deterministic_order(

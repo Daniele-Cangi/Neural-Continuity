@@ -61,6 +61,33 @@ def _safe_int(value: Any) -> int | None:
         return None
 
 
+def _strict_model_bool(model_cfg: dict[str, Any], key: str, default: bool) -> bool:
+    value = model_cfg.get(key, default)
+    if not isinstance(value, bool):
+        raise CommandError(f"model.{key} must be a boolean")
+    return value
+
+
+def _strict_model_string(
+    model_cfg: dict[str, Any], key: str, default: str | None = None
+) -> str | None:
+    value = model_cfg.get(key, default)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise CommandError(f"model.{key} must be a non-empty string")
+    return value
+
+
+def _strict_positive_int(model_cfg: dict[str, Any], key: str) -> int | None:
+    value = model_cfg.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise CommandError(f"model.{key} must be a positive integer")
+    return value
+
+
 class CommandError(RuntimeError):
     pass
 
@@ -150,21 +177,28 @@ def _build_model(config: dict[str, Any]) -> tuple[Any, dict[str, Any], bool]:
         return toy_model, toy_manifest, False
 
     try:
-        normalize_embeddings = bool(model_cfg.get("normalize_embeddings", False))
-        output_dtype = str(model_cfg.get("output_dtype", "float32"))
-        prompt_name = model_cfg.get("prompt_name")
-        prompt = model_cfg.get("prompt")
-        max_sequence_length = model_cfg.get("max_sequence_length")
+        normalize_embeddings = _strict_model_bool(model_cfg, "normalize_embeddings", False)
+        cache_only = _strict_model_bool(model_cfg, "cache_only", True)
+        output_dtype = _strict_model_string(model_cfg, "output_dtype", "float32")
+        model_id = _strict_model_string(model_cfg, "model_id")
+        device = _strict_model_string(model_cfg, "device", "auto")
+        prompt_name = _strict_model_string(model_cfg, "prompt_name")
+        prompt = _strict_model_string(model_cfg, "prompt")
+        max_sequence_length = _strict_positive_int(model_cfg, "max_sequence_length")
+        revision = _strict_model_string(model_cfg, "revision")
         sentence_model = SentenceTransformerModel(
-            model_id=str(model_cfg["model_id"]),
-            device=str(model_cfg.get("device", "auto")),
-            cache_only=bool(model_cfg.get("cache_only", True)),
+            model_id=str(model_id),
+            device=str(device),
+            cache_only=cache_only,
             normalize_embeddings=normalize_embeddings,
-            output_dtype=output_dtype,
-            prompt_name=prompt_name if isinstance(prompt_name, str) else None,
-            prompt=prompt if isinstance(prompt, str) else None,
-            max_sequence_length=_safe_int(max_sequence_length),
+            output_dtype=str(output_dtype),
+            prompt_name=prompt_name,
+            prompt=prompt,
+            max_sequence_length=max_sequence_length,
+            revision=revision,
         )
+    except ValueError as exc:
+        raise CommandError(str(exc)) from exc
     except RuntimeError as exc:
         reason = str(exc)
         blocked_prefixes = (
@@ -187,16 +221,17 @@ def _build_model(config: dict[str, Any]) -> tuple[Any, dict[str, Any], bool]:
 
     sentence_manifest: dict[str, Any] = {
         "model_type": "sentence-transformers",
-        "model_id": str(model_cfg["model_id"]),
-        "device": str(model_cfg.get("device", "auto")),
-        "cache_only": bool(model_cfg.get("cache_only", True)),
+        "model_id": str(model_id),
+        "device": str(device),
+        "cache_only": cache_only,
         "model_manifest": sentence_model.manifest(),
         "requested_configuration": {
             "normalize_embeddings": normalize_embeddings,
-            "output_dtype": output_dtype,
-            "prompt_name": prompt_name if isinstance(prompt_name, str) else None,
-            "prompt": prompt if isinstance(prompt, str) else None,
-            "max_sequence_length": _safe_int(max_sequence_length),
+            "output_dtype": str(output_dtype),
+            "prompt_name": prompt_name,
+            "prompt": prompt,
+            "max_sequence_length": max_sequence_length,
+            "revision": revision,
         },
     }
     return sentence_model, sentence_manifest, True
@@ -428,12 +463,18 @@ def _status_match(expected: str, actual: str) -> str:
 
 
 def _compute_control_health(control_records: list[dict[str, Any]]) -> tuple[str, str]:
+    enabled_records = [record for record in control_records if record.get("enabled") is True]
+    if not enabled_records:
+        raise CommandError("no enabled control evidence is available")
     raw_control_status = PASS
     for record in control_records:
         if not record.get("enabled", False):
             continue
         actual = str(record.get("decision", {}).get("status", INCONCLUSIVE))
         expected = str(record.get("expected_status", PASS))
+        canonical_expected = CONTROL_EXPECTED_STATUS.get(str(record.get("control")))
+        if canonical_expected is not None and expected != canonical_expected:
+            raise CommandError(f"invalid expected status for {record.get('control')}: {expected}")
         if actual not in {PASS, FAIL, INCONCLUSIVE}:
             raise CommandError(f"invalid scientific decision status: {actual}")
         if record.get("decision", {}).get("reason") == "declared_control_observation_missing":
@@ -1188,24 +1229,25 @@ def _is_sha256(value: Any) -> bool:
     )
 
 
-def _load_json_object(path: Path, *, reason_code: str) -> dict[str, Any]:
+def _load_json_object_bytes(data: bytes, *, artifact_name: str, reason_code: str) -> dict[str, Any]:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ReplayEvidenceError(reason_code, f"invalid JSON artifact: {path.name}") from exc
+        payload = json.loads(data.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ReplayEvidenceError(reason_code, f"invalid JSON artifact: {artifact_name}") from exc
     if not isinstance(payload, dict):
-        raise ReplayEvidenceError(reason_code, f"JSON artifact is not an object: {path.name}")
+        raise ReplayEvidenceError(reason_code, f"JSON artifact is not an object: {artifact_name}")
     return payload
 
 
-def _verify_replay_artifacts(path: Path, bundle_bytes: bytes) -> dict[str, Any]:
+def _verify_replay_artifacts(
+    path: Path, bundle_bytes: bytes
+) -> tuple[dict[str, Any], dict[str, bytes]]:
     manifest_path = path.parent / "artifact-manifest.json"
     if not manifest_path.exists():
-        return {
-            "status": "UNVERIFIED_STANDALONE",
-            "artifact_manifest_sha256": None,
-            "verified_artifact_count": 0,
-        }
+        raise ReplayEvidenceError(
+            "ARTIFACT_MANIFEST_MISSING",
+            "authoritative replay requires artifact-manifest.json",
+        )
 
     manifest_bytes = manifest_path.read_bytes()
     try:
@@ -1229,6 +1271,7 @@ def _verify_replay_artifacts(path: Path, bundle_bytes: bytes) -> dict[str, Any]:
 
     base_dir = path.parent.resolve()
     verified_count = 0
+    artifact_bytes: dict[str, bytes] = {}
     for artifact_name, expected_hash in sorted(artifacts.items()):
         if not isinstance(artifact_name, str) or not _is_sha256(expected_hash):
             raise ReplayEvidenceError(
@@ -1244,30 +1287,39 @@ def _verify_replay_artifacts(path: Path, bundle_bytes: bytes) -> dict[str, Any]:
             raise ReplayEvidenceError(
                 "DECLARED_ARTIFACT_MISSING", f"declared artifact is missing: {artifact_name}"
             )
-        actual_hash = (
-            hashlib.sha256(bundle_bytes).hexdigest()
-            if artifact_path == path.resolve()
-            else sha256_file(artifact_path)
-        )
+        try:
+            data = bundle_bytes if artifact_path == path.resolve() else artifact_path.read_bytes()
+        except OSError as exc:
+            raise ReplayEvidenceError(
+                "DECLARED_ARTIFACT_MISSING",
+                f"declared artifact is unreadable: {artifact_name}",
+            ) from exc
+        actual_hash = hashlib.sha256(data).hexdigest()
         if actual_hash.lower() != expected_hash.lower():
             raise ReplayEvidenceError(
                 "ARTIFACT_HASH_MISMATCH", f"artifact hash mismatch: {artifact_name}"
             )
         verified_count += 1
+        artifact_bytes[artifact_name] = data
 
-    return {
-        "status": "VERIFIED",
-        "artifact_manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
-        "verified_artifact_count": verified_count,
-    }
+    return (
+        {
+            "status": "VERIFIED",
+            "artifact_manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+            "verified_artifact_count": verified_count,
+        },
+        artifact_bytes,
+    )
 
 
-def _load_replay_bundle(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+def _load_replay_bundle(
+    path: Path,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, bytes]]:
     try:
         bundle_bytes = Path(path).read_bytes()
     except OSError as exc:
         raise ReplayEvidenceError("REPLAY_BUNDLE_MISSING", "replay bundle is unavailable") from exc
-    artifact_integrity = _verify_replay_artifacts(Path(path), bundle_bytes)
+    artifact_integrity, artifact_bytes = _verify_replay_artifacts(Path(path), bundle_bytes)
     try:
         payload = json.loads(bundle_bytes.decode("utf-8"))
     except (UnicodeError, json.JSONDecodeError) as exc:
@@ -1276,22 +1328,27 @@ def _load_replay_bundle(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
         ) from exc
     if not isinstance(payload, dict):
         raise ReplayEvidenceError("REPLAY_BUNDLE_INVALID", "replay payload must be a JSON object")
-    return payload, artifact_integrity
+    return payload, artifact_integrity, artifact_bytes
 
 
 def _verify_embedded_artifact_coherence(
-    replay_bundle_path: Path, payload: dict[str, Any], artifact_integrity: dict[str, Any]
+    payload: dict[str, Any], artifact_bytes: dict[str, bytes]
 ) -> None:
-    if artifact_integrity["status"] != "VERIFIED":
-        return
     experiment = _load_replay_metadata(payload)
     comparisons = (
         ("dataset-manifest.json", payload.get("dataset")),
         ("decision.json", experiment.get("recorded_decision")),
     )
     for artifact_name, embedded in comparisons:
-        external = _load_json_object(
-            replay_bundle_path.parent / artifact_name,
+        data = artifact_bytes.get(artifact_name)
+        if data is None:
+            raise ReplayEvidenceError(
+                "DECLARED_ARTIFACT_MISSING",
+                f"artifact manifest must declare {artifact_name}",
+            )
+        external = _load_json_object_bytes(
+            data,
+            artifact_name=artifact_name,
             reason_code="ARTIFACT_COHERENCE_ERROR",
         )
         if not isinstance(embedded, dict) or canonical_json_bytes(external) != canonical_json_bytes(
@@ -1304,8 +1361,8 @@ def _verify_embedded_artifact_coherence(
 
 
 def run_m0_replay(replay_bundle_path: Path, output_root: Path | None = None) -> dict[str, Any]:
-    payload, artifact_integrity = _load_replay_bundle(Path(replay_bundle_path))
-    _verify_embedded_artifact_coherence(Path(replay_bundle_path), payload, artifact_integrity)
+    payload, artifact_integrity, artifact_bytes = _load_replay_bundle(Path(replay_bundle_path))
+    _verify_embedded_artifact_coherence(payload, artifact_bytes)
     dataset = payload.get("dataset")
     if not isinstance(dataset, dict):
         raise ReplayEvidenceError("DATASET_EVIDENCE_MISSING", "replay payload is missing dataset")
@@ -1319,7 +1376,20 @@ def run_m0_replay(replay_bundle_path: Path, output_root: Path | None = None) -> 
             raise ReplayEvidenceError(
                 "FIXTURE_EVIDENCE_MISSING", "replay payload is missing fixture evidence"
             )
-        fixture = load_retrieval_fixture((replay_bundle_path.parent / path_value).resolve())
+        relative_fixture = Path(path_value)
+        if relative_fixture.is_absolute():
+            raise ReplayEvidenceError(
+                "FIXTURE_PATH_INVALID", "fixture path must be relative to the run directory"
+            )
+        base_dir = replay_bundle_path.parent.resolve()
+        resolved_fixture = (base_dir / relative_fixture).resolve()
+        try:
+            resolved_fixture.relative_to(base_dir)
+        except ValueError as exc:
+            raise ReplayEvidenceError(
+                "FIXTURE_PATH_INVALID", "fixture path escapes the run directory"
+            ) from exc
+        fixture = load_retrieval_fixture(resolved_fixture)
 
     expected_fixture_identity = dataset.get("fixture_identity_sha256")
     if not isinstance(expected_fixture_identity, str) or not _is_sha256(expected_fixture_identity):
@@ -1380,6 +1450,40 @@ def run_m0_replay(replay_bundle_path: Path, output_root: Path | None = None) -> 
     control_plan = experiment.get("control_plan", {})
     if not isinstance(control_plan, dict):
         raise ReplayEvidenceError("CONTROL_PLAN_INVALID", "replay control plan is missing")
+    for required_control in ("exact_repeat", "negative", "boundary"):
+        if required_control not in control_plan:
+            raise ReplayEvidenceError(
+                "CONTROL_PLAN_INVALID",
+                f"replay control plan is missing {required_control}",
+            )
+    exact_repeat_plan = control_plan["exact_repeat"]
+    if not isinstance(exact_repeat_plan, list):
+        raise ReplayEvidenceError(
+            "CONTROL_PLAN_INVALID", "exact_repeat control plan must be a list"
+        )
+    for row in exact_repeat_plan:
+        if not isinstance(row, dict) or not isinstance(row.get("enabled"), bool):
+            raise ReplayEvidenceError(
+                "CONTROL_PLAN_INVALID", "exact_repeat control declaration is malformed"
+            )
+        if row.get("expected_status", PASS) != CONTROL_EXPECTED_STATUS["exact_repeat"]:
+            raise ReplayEvidenceError(
+                "CONTROL_EXPECTATION_INVALID", "exact_repeat must expect PASS"
+            )
+    for control_name in ("negative", "boundary"):
+        declaration = control_plan[control_name]
+        if not isinstance(declaration, dict) or not isinstance(declaration.get("enabled"), bool):
+            raise ReplayEvidenceError(
+                "CONTROL_PLAN_INVALID", f"{control_name} control declaration is malformed"
+            )
+        declared_expected = declaration.get(
+            "expected_status", CONTROL_EXPECTED_STATUS[control_name]
+        )
+        if declared_expected != CONTROL_EXPECTED_STATUS[control_name]:
+            raise ReplayEvidenceError(
+                "CONTROL_EXPECTATION_INVALID",
+                f"{control_name} must expect {CONTROL_EXPECTED_STATUS[control_name]}",
+            )
     baseline_plan = control_plan.get("baseline_observation")
     if not isinstance(baseline_plan, dict):
         raise ReplayEvidenceError(
@@ -1440,14 +1544,13 @@ def run_m0_replay(replay_bundle_path: Path, output_root: Path | None = None) -> 
     )
 
     control_records: list[dict[str, Any]] = []
-    for idx, row in enumerate(
-        control_plan.get("exact_repeat", [])
-        if isinstance(control_plan.get("exact_repeat"), list)
-        else []
-    ):
-        if not isinstance(row, dict) or not row.get("enabled", True):
+    for idx, row in enumerate(exact_repeat_plan):
+        if not row["enabled"]:
             continue
-        label = str(row.get("run_label", f"exact_repeat_{idx}"))
+        label_value = row.get("run_label")
+        if not isinstance(label_value, str) or not label_value:
+            raise ReplayEvidenceError("CONTROL_PLAN_INVALID", "exact_repeat run_label is missing")
+        label = label_value
         exact_obs: ModelObservation | None = by_label.get(label)
         if exact_obs is None:
             raise ReplayEvidenceError(
@@ -1482,14 +1585,12 @@ def run_m0_replay(replay_bundle_path: Path, output_root: Path | None = None) -> 
                 decision=decision.as_dict(),
                 comparison=comparison,
                 enabled=True,
-                expected_status=row.get("expected_status", PASS),
+                expected_status=CONTROL_EXPECTED_STATUS["exact_repeat"],
                 comparison_run=idx,
             )
         )
 
-    negative_plan = _load_control_meta(
-        control_plan.get("negative"), {"enabled": False, "expected_status": FAIL}
-    )
+    negative_plan = control_plan["negative"]
     if negative_plan.get("enabled"):
         negative_label = str(negative_plan.get("run_label", "negative"))
         negative_obs = by_label.get(negative_label)
@@ -1528,7 +1629,7 @@ def run_m0_replay(replay_bundle_path: Path, output_root: Path | None = None) -> 
                     decision=decision.as_dict(),
                     comparison=comparison,
                     enabled=True,
-                    expected_status=negative_plan.get("expected_status", FAIL),
+                    expected_status=CONTROL_EXPECTED_STATUS["negative"],
                     comparison_run=0,
                 )
             )
@@ -1540,14 +1641,11 @@ def run_m0_replay(replay_bundle_path: Path, output_root: Path | None = None) -> 
                 decision={"status": INCONCLUSIVE},
                 comparison=None,
                 enabled=False,
-                expected_status=negative_plan.get("expected_status", FAIL),
+                expected_status=CONTROL_EXPECTED_STATUS["negative"],
             )
         )
 
-    boundary_plan = _load_control_meta(
-        control_plan.get("boundary"),
-        {"enabled": False, "expected_status": INCONCLUSIVE},
-    )
+    boundary_plan = control_plan["boundary"]
     if boundary_plan.get("enabled"):
         boundary_label = str(boundary_plan.get("run_label", "boundary"))
         boundary_obs = by_label.get(boundary_label)
@@ -1557,7 +1655,11 @@ def run_m0_replay(replay_bundle_path: Path, output_root: Path | None = None) -> 
                 f"declared boundary-control observation is missing: {boundary_label}",
             )
         else:
-            selected_attempt = boundary_plan.get("selected_attempt", {})
+            selected_attempt = boundary_plan.get("selected_attempt")
+            if not isinstance(selected_attempt, dict):
+                raise ReplayEvidenceError(
+                    "CONTROL_PLAN_INVALID", "boundary selected_attempt is missing"
+                )
             comparison = compare_observations(
                 source=baseline,
                 candidate=boundary_obs,
@@ -1599,7 +1701,7 @@ def run_m0_replay(replay_bundle_path: Path, output_root: Path | None = None) -> 
                     decision=boundary_decision,
                     comparison=comparison,
                     enabled=True,
-                    expected_status=boundary_plan.get("expected_status", INCONCLUSIVE),
+                    expected_status=CONTROL_EXPECTED_STATUS["boundary"],
                     comparison_run=0,
                 )
             )
@@ -1611,7 +1713,7 @@ def run_m0_replay(replay_bundle_path: Path, output_root: Path | None = None) -> 
                 decision={"status": INCONCLUSIVE},
                 comparison=None,
                 enabled=False,
-                expected_status=boundary_plan.get("expected_status", INCONCLUSIVE),
+                expected_status=CONTROL_EXPECTED_STATUS["boundary"],
             )
         )
 
@@ -1634,21 +1736,35 @@ def run_m0_replay(replay_bundle_path: Path, output_root: Path | None = None) -> 
     }
 
     recorded_decision = experiment.get("recorded_decision")
-    recorded_control_decisions = []
-    recorded_status = None
-    if isinstance(recorded_decision, dict):
-        recorded_status = recorded_decision.get("measurement_integrity_status")
-        status_match = recorded_status == measurement_integrity_status
-        recorded_control_decisions = recorded_decision.get("control_decisions", [])
-        if not isinstance(recorded_control_decisions, list):
-            recorded_control_decisions = []
-    else:
-        status_match = False
+    if not isinstance(recorded_decision, dict):
+        raise ReplayEvidenceError(
+            "RECORDED_DECISION_MISSING", "replay bundle is missing its recorded decision"
+        )
+    recorded_status = recorded_decision.get("measurement_integrity_status")
+    status_match = recorded_status == measurement_integrity_status
+    recorded_control_decisions = recorded_decision.get("control_decisions")
+    if not isinstance(recorded_control_decisions, list):
+        raise ReplayEvidenceError(
+            "RECORDED_DECISION_INVALID", "recorded control decisions must be a list"
+        )
     control_outcome_checks, control_outcome_match = _replay_control_outcome_checks(
         control_records, recorded_control_decisions
     )
     decision_payload["control_outcome_checks"] = control_outcome_checks
     decision_payload["control_outcome_match"] = control_outcome_match
+    if not status_match or not control_outcome_match:
+        mismatch_details = {
+            "recorded_status": recorded_status,
+            "recomputed_status": measurement_integrity_status,
+            "status_match": status_match,
+            "control_outcome_match": control_outcome_match,
+            "control_outcome_checks": control_outcome_checks,
+        }
+        mismatch_json = json.dumps(mismatch_details, sort_keys=True)
+        raise ReplayEvidenceError(
+            "REPLAY_DECISION_MISMATCH",
+            f"replay does not match recorded evidence: {mismatch_json}",
+        )
 
     return {
         "run": str(replay_bundle_path),

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -11,6 +12,7 @@ from neural_continuity.bootstrap import build_envelopes
 from neural_continuity.cli import (
     REQUIRED_METRICS,
     ReplayEvidenceError,
+    main,
     run_m0,
     run_m0_replay,
 )
@@ -575,6 +577,16 @@ def _write_replay_config(tmp_path: Path) -> Path:
     return config_path
 
 
+def _rewrite_json_artifact(run_dir: Path, artifact_name: str, payload: dict) -> Path:
+    artifact_path = run_dir / artifact_name
+    artifact_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    manifest_path = run_dir / "artifact-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"][artifact_name] = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    return artifact_path
+
+
 def test_m0_replay_recomputes_matching_decision(tmp_path: Path):
     config_path = _write_replay_config(tmp_path)
     summary = run_m0(config_path=config_path, output_root=tmp_path / "runs")
@@ -625,11 +637,8 @@ def test_m0_replay_fails_if_declared_control_is_missing(tmp_path: Path):
     replay_bundle["observations"] = [
         obs for obs in replay_bundle.get("observations", []) if obs.get("run_label") != "negative"
     ]
-    standalone_dir = tmp_path / "standalone-missing-negative"
-    standalone_dir.mkdir()
-    missing_control_replay_path = standalone_dir / "replay-bundle.json"
-    missing_control_replay_path.write_text(
-        json.dumps(replay_bundle, indent=2, sort_keys=True), encoding="utf-8"
+    missing_control_replay_path = _rewrite_json_artifact(
+        replay_path.parent, "replay-bundle.json", replay_bundle
     )
 
     with pytest.raises(
@@ -674,10 +683,7 @@ def test_m0_replay_fails_closed_for_declared_measurement_evidence(
     replay_bundle["observations"] = [
         row for row in replay_bundle["observations"] if row["run_label"] != missing_label
     ]
-    standalone_dir = tmp_path / f"standalone-missing-{missing_kind}"
-    standalone_dir.mkdir()
-    replay_path = standalone_dir / "replay-bundle.json"
-    replay_path.write_text(json.dumps(replay_bundle, sort_keys=True), encoding="utf-8")
+    replay_path = _rewrite_json_artifact(source_path.parent, "replay-bundle.json", replay_bundle)
 
     with pytest.raises(ReplayEvidenceError) as exc:
         run_m0_replay(replay_path)
@@ -690,11 +696,83 @@ def test_m0_replay_rejects_fixture_identity_mismatch(tmp_path: Path):
     source_path = Path(summary["run_dir"]) / "replay-bundle.json"
     replay_bundle = json.loads(source_path.read_text(encoding="utf-8"))
     replay_bundle["dataset"]["fixture_identity_sha256"] = "0" * 64
-    standalone_dir = tmp_path / "standalone-fixture-mismatch"
-    standalone_dir.mkdir()
-    replay_path = standalone_dir / "replay-bundle.json"
-    replay_path.write_text(json.dumps(replay_bundle, sort_keys=True), encoding="utf-8")
+    _rewrite_json_artifact(source_path.parent, "dataset-manifest.json", replay_bundle["dataset"])
+    replay_path = _rewrite_json_artifact(source_path.parent, "replay-bundle.json", replay_bundle)
 
     with pytest.raises(ReplayEvidenceError) as exc:
         run_m0_replay(replay_path)
     assert exc.value.reason_code == "FIXTURE_IDENTITY_MISMATCH"
+
+
+def test_m0_replay_requires_artifact_manifest(tmp_path: Path):
+    config_path = _write_replay_config(tmp_path)
+    summary = run_m0(config_path=config_path, output_root=tmp_path / "runs")
+    run_dir = Path(summary["run_dir"])
+    (run_dir / "artifact-manifest.json").unlink()
+
+    with pytest.raises(ReplayEvidenceError) as exc:
+        run_m0_replay(run_dir / "replay-bundle.json")
+    assert exc.value.reason_code == "ARTIFACT_MANIFEST_MISSING"
+
+
+@pytest.mark.parametrize(
+    ("mutation", "reason_code"),
+    [
+        ("missing_negative", "CONTROL_PLAN_INVALID"),
+        ("malformed_exact", "CONTROL_PLAN_INVALID"),
+        ("wrong_negative_expectation", "CONTROL_EXPECTATION_INVALID"),
+    ],
+)
+def test_m0_replay_rejects_non_authoritative_control_plan(
+    tmp_path: Path, mutation: str, reason_code: str
+):
+    config_path = _write_replay_config(tmp_path)
+    summary = run_m0(config_path=config_path, output_root=tmp_path / "runs")
+    run_dir = Path(summary["run_dir"])
+    replay_path = run_dir / "replay-bundle.json"
+    replay_bundle = json.loads(replay_path.read_text(encoding="utf-8"))
+    control_plan = replay_bundle["experiment"]["control_plan"]
+    if mutation == "missing_negative":
+        del control_plan["negative"]
+    elif mutation == "malformed_exact":
+        control_plan["exact_repeat"] = {"enabled": True}
+    else:
+        control_plan["negative"]["expected_status"] = "PASS"
+    replay_path = _rewrite_json_artifact(run_dir, "replay-bundle.json", replay_bundle)
+
+    with pytest.raises(ReplayEvidenceError) as exc:
+        run_m0_replay(replay_path)
+    assert exc.value.reason_code == reason_code
+
+
+def test_m0_replay_rejects_fixture_path_escape(tmp_path: Path):
+    config_path = _write_replay_config(tmp_path)
+    summary = run_m0(config_path=config_path, output_root=tmp_path / "runs")
+    run_dir = Path(summary["run_dir"])
+    replay_path = run_dir / "replay-bundle.json"
+    replay_bundle = json.loads(replay_path.read_text(encoding="utf-8"))
+    replay_bundle["dataset"].pop("fixture_payload")
+    replay_bundle["dataset"]["fixture_path"] = "../../outside.json"
+    _rewrite_json_artifact(run_dir, "dataset-manifest.json", replay_bundle["dataset"])
+    replay_path = _rewrite_json_artifact(run_dir, "replay-bundle.json", replay_bundle)
+
+    with pytest.raises(ReplayEvidenceError) as exc:
+        run_m0_replay(replay_path)
+    assert exc.value.reason_code == "FIXTURE_PATH_INVALID"
+
+
+def test_m0_replay_mismatch_is_execution_error_and_nonzero_exit(tmp_path: Path, capsys):
+    config_path = _write_replay_config(tmp_path)
+    summary = run_m0(config_path=config_path, output_root=tmp_path / "runs")
+    run_dir = Path(summary["run_dir"])
+    replay_path = run_dir / "replay-bundle.json"
+    replay_bundle = json.loads(replay_path.read_text(encoding="utf-8"))
+    recorded_decision = replay_bundle["experiment"]["recorded_decision"]
+    recorded_decision["measurement_integrity_status"] = "FAIL"
+    _rewrite_json_artifact(run_dir, "decision.json", recorded_decision)
+    replay_path = _rewrite_json_artifact(run_dir, "replay-bundle.json", replay_bundle)
+
+    assert main(["m0-replay", "--bundle", str(replay_path)]) == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["execution_status"] == "EXECUTION_ERROR"
+    assert payload["reason_code"] == "REPLAY_DECISION_MISMATCH"
