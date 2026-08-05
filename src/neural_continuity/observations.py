@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import os
 import platform
 import time
@@ -247,3 +248,34 @@ def save_raw_observations_parquet(
     for observation in observations:
         rows.extend(observation_to_rows(observation))
     pd.DataFrame(rows).to_parquet(path, index=False)
+
+
+def load_raw_observation_rows_parquet(data: bytes) -> list[dict[str, Any]]:
+    required_columns = {"run_id", "run_label", "query_id", "doc_id", "score", "rank"}
+    try:
+        frame = pd.read_parquet(io.BytesIO(data))
+    except Exception as exc:
+        raise ValueError("raw observations parquet is unreadable") from exc
+    if set(frame.columns) != required_columns:
+        raise ValueError("raw observations parquet schema is invalid")
+    rows = [
+        {
+            "run_id": str(row["run_id"]),
+            "run_label": str(row["run_label"]),
+            "query_id": str(row["query_id"]),
+            "doc_id": str(row["doc_id"]),
+            "score": float(row["score"]),
+            "rank": int(row["rank"]),
+        }
+        for row in frame.to_dict(orient="records")
+    ]
+    return sorted(
+        rows,
+        key=lambda row: (
+            row["run_id"],
+            row["run_label"],
+            row["query_id"],
+            row["rank"],
+            row["doc_id"],
+        ),
+    )

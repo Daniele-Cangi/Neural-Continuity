@@ -11,6 +11,8 @@ from typing import Any
 
 from .observations import ModelObservation, observation_to_manifest
 
+REPLAY_BUNDLE_FORMAT_VERSION = "2.0.0"
+
 
 def canonical_json_bytes(payload: Mapping[str, Any] | list[Any]) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
@@ -31,7 +33,20 @@ def sha256_file(path: Path) -> str:
 
 
 def build_environment_manifest() -> dict[str, Any]:
-    deps = ["numpy", "pandas", "pyarrow", "psutil", "torch", "scipy", "PyYAML"]
+    deps = [
+        "numpy",
+        "pandas",
+        "pyarrow",
+        "psutil",
+        "torch",
+        "sentence-transformers",
+        "transformers",
+        "huggingface-hub",
+        "tokenizers",
+        "safetensors",
+        "scipy",
+        "PyYAML",
+    ]
     versions: dict[str, str] = {}
     for dep in deps:
         try:
@@ -113,7 +128,7 @@ def save_replay_bundle(
     config: Mapping[str, Any],
 ) -> str:
     payload = {
-        "format_version": "1.0.0",
+        "format_version": REPLAY_BUNDLE_FORMAT_VERSION,
         "dataset": dict(dataset_identity),
         "observations": [observation_to_manifest(observation) for observation in observations],
         "experiment": dict(config),
