@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 
@@ -24,6 +24,14 @@ class VerifiedOnnxSource:
     artifact_sha256: str
     transition_a_manifest_sha256: str
     execution_provider: str
+
+
+class VerifiedOnnxArtifact(Protocol):
+    @property
+    def artifact_path(self) -> Path: ...
+
+    @property
+    def execution_provider(self) -> str: ...
 
 
 def load_verified_onnx_source(
@@ -72,7 +80,7 @@ def load_verified_onnx_source(
     return VerifiedOnnxSource(artifact_path, actual_hash, expected_manifest, provider)
 
 
-def open_onnx_session(source: VerifiedOnnxSource) -> Any:
+def open_onnx_session(source: VerifiedOnnxArtifact) -> Any:
     try:
         import onnxruntime
     except ModuleNotFoundError as exc:

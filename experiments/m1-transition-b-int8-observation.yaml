@@ -1,0 +1,25 @@
+experiment_name: M1_TRANSITION_B_INT8_TARGET_OBSERVATION_V1
+
+evidence_scope:
+  classification: onnx_int8_target_observation
+  qualifying_m1_evidence: false
+  limitation: captures target observations only; source-target comparison and Transition B decision remain pending
+
+contract_path: contracts/m1-transition-b-v1.json
+
+dataset:
+  dataset_id: nc-m1-beir-scifact-v1
+
+model:
+  model_id: sentence-transformers/all-MiniLM-L6-v2
+  revision: 1110a243fdf4706b3f48f1d95db1a4f5529b4d41
+  device: cpu
+  cache_only: true
+  output_dtype: float32
+
+evaluation:
+  top_k: 10
+
+observation:
+  execution_provider: CPUExecutionProvider
+  batch_sizes: [1, 16, 64]

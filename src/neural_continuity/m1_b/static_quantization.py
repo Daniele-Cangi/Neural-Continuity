@@ -6,6 +6,7 @@ import os
 import shutil
 import tempfile
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -23,10 +24,20 @@ from neural_continuity.m1_teacher_evidence import (
     _load_teacher,
     _require_mapping,
     _require_string,
+    _safe_artifact_path,
+    _verify_artifacts,
     _write_bytes,
 )
 
 _EXPECTED_INPUTS = ("input_ids", "attention_mask", "token_type_ids")
+
+
+@dataclass(frozen=True)
+class VerifiedStaticQuantizedCandidate:
+    artifact_path: Path
+    artifact_sha256: str
+    candidate_manifest_sha256: str
+    execution_provider: str
 
 
 class StaticCalibrationReader:
@@ -156,6 +167,63 @@ def _run_static_quantization(
         "onnxruntime_version": onnxruntime.__version__,
         "execution_provider": "CPUExecutionProvider",
     }
+
+
+def load_verified_static_quantized_candidate(
+    package_directory: str | Path, contract_path: str | Path
+) -> VerifiedStaticQuantizedCandidate:
+    contract = _load_json(Path(contract_path), "TRANSITION_B_CONTRACT_INVALID")
+    contract_sha256 = sha256_file(Path(contract_path))
+    root = Path(package_directory).resolve()
+    manifest_path = root / "candidate-manifest.json"
+    manifest = _load_json(manifest_path, "INT8_CANDIDATE_MANIFEST_INVALID")
+    if manifest.get("package_kind") != "m1_onnx_int8_static_qdq_candidate":
+        raise _fail(
+            "INT8_CANDIDATE_MANIFEST_INVALID",
+            "candidate package kind is not authoritative",
+        )
+    if manifest.get("candidate_status") != "CAPTURED_PENDING_OBSERVATION":
+        raise _fail("INT8_CANDIDATE_STATUS_INVALID", "candidate is not pending observation")
+    if (
+        manifest.get("contract_id") != contract.get("contract_id")
+        or manifest.get("contract_sha256") != contract_sha256
+    ):
+        raise _fail("INT8_CANDIDATE_CONTRACT_MISMATCH", "candidate contract identity differs")
+    _verify_artifacts(root, manifest, "artifacts")
+    configuration = _require_mapping(
+        manifest.get("quantization_configuration"), "quantization_configuration"
+    )
+    expected = {
+        "mode": "static",
+        "quantization_format": "QDQ",
+        "activation_type": "QUInt8",
+        "weight_type": "QInt8",
+        "per_channel": True,
+        "calibration_method": "MinMax",
+        "execution_provider": "CPUExecutionProvider",
+    }
+    if any(configuration.get(field) != value for field, value in expected.items()):
+        raise _fail("INT8_CANDIDATE_CONFIGURATION_INVALID", "candidate quantization differs")
+    artifact = next(
+        (
+            entry
+            for entry in manifest.get("artifacts", [])
+            if isinstance(entry, Mapping) and entry.get("path") == "teacher-int8-qdq.onnx"
+        ),
+        None,
+    )
+    if not isinstance(artifact, Mapping):
+        raise _fail("INT8_CANDIDATE_ARTIFACT_MISSING", "candidate artifact is undeclared")
+    artifact_path = _safe_artifact_path(root, "teacher-int8-qdq.onnx")
+    artifact_sha256 = _require_string(artifact.get("sha256"), "candidate artifact sha256")
+    if sha256_file(artifact_path) != artifact_sha256:
+        raise _fail("INT8_CANDIDATE_ARTIFACT_MISMATCH", "candidate artifact SHA-256 differs")
+    return VerifiedStaticQuantizedCandidate(
+        artifact_path=artifact_path,
+        artifact_sha256=artifact_sha256,
+        candidate_manifest_sha256=sha256_file(manifest_path),
+        execution_provider="CPUExecutionProvider",
+    )
 
 
 def create_static_quantized_candidate(
