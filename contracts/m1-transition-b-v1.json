@@ -1,0 +1,113 @@
+{
+  "version": "1.0.0",
+  "contract_id": "m1-transition-b-v1",
+  "contract_authority": "contracts/m1-transition-b-v1.json",
+  "transition": {
+    "id": "B",
+    "source": "verified ONNX FP32 Transition A artifact",
+    "target": "ONNX INT8",
+    "purpose": "evidence-bounded quantization continuity decision, not universal equivalence certification"
+  },
+  "decision_states": {
+    "scientific": ["PASS", "FAIL", "INCONCLUSIVE"],
+    "technical": ["BLOCKED", "EXECUTION_ERROR"],
+    "scientific_fail_rule": "FAIL requires complete, valid, replayable ONNX FP32 and ONNX INT8 evidence demonstrating a frozen operational-tolerance violation."
+  },
+  "preconditions": {
+    "transition_a": {
+      "required_status": "PASS",
+      "evidence_manifest_sha256": "12566ccbcc7f3f74a799abca2189a9b0906efd44a0f038ce0dc7c44b7b87fc3a",
+      "onnx_fp32_artifact_sha256": "5c0d999bd6b5e64e36cad1f61a83ef8e7507d55be49086745780fabb7c648511",
+      "replay_required": true
+    },
+    "onnx_fp32_measurement_null": {
+      "required_before_candidate": true,
+      "required_source": "verified Transition A ONNX FP32 artifact",
+      "required_families": ["repeated_inference", "batch_size_variation"],
+      "required_batch_sizes": [1, 16, 64],
+      "minimum_repeated_inference_count": 3,
+      "evidence_status": "NOT_YET_CAPTURED"
+    },
+    "target_capture": {
+      "minimum_complete_source_target_pairs": 3,
+      "required_batch_sizes": [1, 16, 64],
+      "required_artifacts": [
+        "ONNX FP32 source artifact",
+        "ONNX INT8 target artifact",
+        "quantization configuration",
+        "calibration identity manifest",
+        "runtime and execution-provider manifest",
+        "canonical source and target observations",
+        "comparison report",
+        "decision record",
+        "replay bundle",
+        "artifact manifest"
+      ],
+      "missing_artifact_or_observation_state": "BLOCKED"
+    }
+  },
+  "calibration": {
+    "mode": "static",
+    "quantization_format": "QDQ",
+    "activation_type": "QUInt8",
+    "weight_type": "QInt8",
+    "per_channel": true,
+    "calibration_method": "MinMax",
+    "data_role": "quantization_calibration",
+    "canonical_order": "query ID ascending by UTF-8 bytes",
+    "max_query_count": 162,
+    "prohibited_data_roles": [
+      "measurement_null",
+      "contract_development",
+      "validation",
+      "frozen_critical",
+      "final_holdout"
+    ],
+    "leakage_behavior": "BLOCKED"
+  },
+  "data_roles": {
+    "measurement_null": "ONNX FP32 source resolution only; never calibration or promotion evidence",
+    "quantization_calibration": "the only role allowed to calibrate Transition B static INT8",
+    "contract_development": "diagnostic only; cannot tune a frozen candidate after target evidence exists",
+    "validation": "pre-promotion evaluation after the contract and INT8 configuration are frozen",
+    "frozen_critical": "blocking regression role with zero tolerance for declared quality and ranking regressions",
+    "final_holdout": "single final decision role; excluded from calibration, threshold selection, and iterative target changes"
+  },
+  "tolerance_inheritance": {
+    "source_contract_id": "m1-transition-a-v1",
+    "source_contract_sha256": "772e0df5133de09f6108cb42144e9b2ee69e47c0694bdf5b60ca4d88c18ee5c4",
+    "rule": "Transition B inherits the frozen functional and topology materiality limits from Transition A. The ONNX FP32 measurement null supplies detection limits only and cannot directly select operational tolerances."
+  },
+  "decision_policy": {
+    "PASS": "All required replayable evidence is present, the static calibration identity is valid, and every inherited applicable operational tolerance is satisfied.",
+    "FAIL": "Valid replayable evidence shows one or more inherited applicable operational tolerances exceeded.",
+    "INCONCLUSIVE": "Evidence is complete but uncertainty or an interval intersects an inherited operational boundary without a justified PASS or FAIL.",
+    "BLOCKED": "A declared artifact, observation, calibration identity, prerequisite, or replay requirement is missing or fails integrity verification.",
+    "EXECUTION_ERROR": "Quantization, ONNX runtime, provider, preprocessing, or output execution fails. This is not a scientific regression."
+  },
+  "replay_policy": {
+    "source_and_target_observations_required": true,
+    "decision_and_individual_role_outcomes_must_match": true,
+    "missing_declared_control_or_observation_fails_closed": true,
+    "artifact_integrity": "SHA-256 tamper-evident manifests; artifacts are not claimed physically immutable"
+  },
+  "implementation_boundaries": {
+    "calibration_data": "validates the calibration split identity and produces only canonical calibration batches",
+    "quantization": "creates the INT8 artifact from a validated ONNX FP32 artifact and calibration reader",
+    "onnx_observation": "runs one frozen ONNX artifact and captures canonical observations",
+    "comparison": "performs pure source-target metric and topology comparison",
+    "decision": "applies this contract to a complete comparison report",
+    "replay": "reconstructs comparison and decision from recorded artifacts without model execution",
+    "orchestration": "thin dispatch only; it must not duplicate the responsibilities above"
+  },
+  "non_scope": [
+    "INT8 candidate generation before ONNX FP32 measurement null",
+    "dynamic quantization",
+    "CUDA qualification",
+    "model retraining",
+    "Spectra integration",
+    "distillation",
+    "pruning",
+    "routing"
+  ]
+}
