@@ -1,0 +1,150 @@
+{
+  "version": "1.0.0",
+  "contract_id": "m1-transition-a-v1",
+  "contract_authority": "contracts/m1-transition-a-v1.json",
+  "transition": {
+    "id": "A",
+    "source": "PyTorch FP32 real teacher",
+    "target": "ONNX FP32",
+    "purpose": "evidence-bounded continuity decision, not universal equivalence certification"
+  },
+  "decision_states": {
+    "scientific": ["PASS", "FAIL", "INCONCLUSIVE"],
+    "technical": ["BLOCKED", "EXECUTION_ERROR"],
+    "scientific_fail_rule": "FAIL is permitted only when complete, valid, replayable source and target evidence demonstrates an operational-tolerance violation."
+  },
+  "preconditions": {
+    "source_baseline": {
+      "evidence_manifest_sha256": "9caae6846b59c40bea3fe08eff5d2f2edb00edd1b5d9ef10bc8f5c3854370c51",
+      "teacher_model_id": "sentence-transformers/all-MiniLM-L6-v2",
+      "teacher_revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+      "execution_path": "cpu",
+      "output_dtype": "float32",
+      "preprocessing_semantics": "frozen by the source teacher manifest"
+    },
+    "measurement_null": {
+      "evidence_manifest_sha256": "f3250f96577c1594b356c89252e3482e914f8b891d1bedbe84040206743a2f3d",
+      "dataset_materialization_manifest_sha256": "0746d98f5e69c6a0ee48ca3f47b342de1d968a877c90df26ffe8f893437fd5de",
+      "status": "CAPTURED_NOT_DECIDED",
+      "replay_required": true,
+      "evidence_strength": "preliminary empirical source envelope; not a probabilistic prediction interval"
+    },
+    "target_capture": {
+      "minimum_complete_source_target_pairs": 3,
+      "required_batch_sizes": [1, 16, 64],
+      "required_artifacts": [
+        "onnx-model artifact",
+        "onnx graph SHA-256",
+        "tokenizer and preprocessing manifest",
+        "runtime and execution-provider manifest",
+        "canonical observations",
+        "comparison report",
+        "decision record",
+        "replay bundle",
+        "artifact manifest"
+      ],
+      "missing_artifact_or_observation_state": "BLOCKED"
+    },
+    "transition_b": {
+      "may_begin_only_when_transition_a": "PASS"
+    }
+  },
+  "data_roles": {
+    "measurement_null": "estimates source measurement resolution only; never promotes a candidate",
+    "quantization_calibration": "reserved for transition B calibration and prohibited from transition A tolerance selection",
+    "contract_development": "diagnostic development role; cannot tune a frozen contract after target evidence exists",
+    "validation": "pre-promotion evaluation after the contract is frozen",
+    "frozen_critical": "blocking regression role with zero tolerance for declared quality and ranking regressions",
+    "final_holdout": "single final decision role; excluded from threshold selection and all iterative target changes"
+  },
+  "detection_limits": {
+    "source": "real_teacher_measurement_null",
+    "application": "A difference no larger than these empirical limits is not distinguishable from the observed CPU source variation. These limits do not set material acceptance.",
+    "repeated_inference": {
+      "comparison_count": 2,
+      "batch_size": 64,
+      "document_max_abs_delta": 0.0,
+      "query_max_abs_delta": 0.0,
+      "document_min_cosine_similarity": 0.9999998211860657,
+      "query_min_cosine_similarity": 1.0,
+      "ranking_change_count": 0,
+      "ranking_change_fraction": 0.0,
+      "absolute_metric_delta": {
+        "recall_at_k": 0.0,
+        "mrr_at_k": 0.0,
+        "ndcg_at_k": 0.0
+      }
+    },
+    "batch_size_variation": {
+      "comparison_count": 3,
+      "batch_sizes": [1, 16, 64],
+      "document_max_abs_delta": 1.043081283569336e-07,
+      "query_max_abs_delta": 9.73232090473175e-08,
+      "document_min_cosine_similarity": 0.9999998211860657,
+      "query_min_cosine_similarity": 1.0,
+      "ranking_change_count": 0,
+      "ranking_change_fraction": 0.0,
+      "absolute_metric_delta": {
+        "recall_at_k": 0.0,
+        "mrr_at_k": 0.0,
+        "ndcg_at_k": 0.0
+      }
+    }
+  },
+  "operational_tolerances": {
+    "selection_basis": {
+      "method": "pre-candidate governance declaration",
+      "prohibited_inputs": [
+        "ONNX candidate results",
+        "quantization candidate results",
+        "validation results from a candidate",
+        "final_holdout results"
+      ],
+      "not_derived_directly_from": "measurement null envelope",
+      "rationale": "The limits protect retrieval semantics while allowing numerically normal FP32 interchange differences. They are frozen before any ONNX export and may change only in a new contract version."
+    },
+    "functional_all_decision_roles": {
+      "embedding_max_abs_delta_lte": 1e-05,
+      "embedding_min_cosine_similarity_gte": 0.99999
+    },
+    "topology_frozen_critical": {
+      "ranking_change_count_lte": 0,
+      "recall_at_k_decrease_lte": 0.0,
+      "mrr_at_k_decrease_lte": 0.0,
+      "ndcg_at_k_decrease_lte": 0.0
+    },
+    "topology_validation_and_final_holdout": {
+      "ranking_change_fraction_lte": 0.01,
+      "recall_at_k_decrease_lte": 0.005,
+      "mrr_at_k_decrease_lte": 0.005,
+      "ndcg_at_k_decrease_lte": 0.005
+    },
+    "system_metrics": {
+      "may_be_reported": true,
+      "may_block_transition_a": false,
+      "reason": "The contract does not claim a portable performance baseline across hardware."
+    }
+  },
+  "decision_policy": {
+    "PASS": "All required replayable evidence is present, target execution is valid, and every applicable operational tolerance is satisfied.",
+    "FAIL": "Valid replayable evidence shows one or more applicable operational tolerances exceeded.",
+    "INCONCLUSIVE": "Evidence is complete but uncertainty or an interval intersects an operational boundary without a justified PASS or FAIL.",
+    "BLOCKED": "A declared artifact, observation, prerequisite, or replay requirement is missing or fails integrity verification.",
+    "EXECUTION_ERROR": "Export, ONNX runtime, provider, preprocessing, or output execution fails. This is not a scientific regression."
+  },
+  "replay_policy": {
+    "source_and_target_observations_required": true,
+    "decision_and_individual_role_outcomes_must_match": true,
+    "missing_declared_control_or_observation_fails_closed": true,
+    "artifact_integrity": "SHA-256 tamper-evident manifests; artifacts are not claimed physically immutable"
+  },
+  "non_scope": [
+    "ONNX export implementation",
+    "quantization implementation",
+    "transition B decision",
+    "Spectra integration",
+    "distillation",
+    "pruning",
+    "routing"
+  ]
+}
