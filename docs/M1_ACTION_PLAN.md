@@ -365,7 +365,8 @@ Vedi sezione 12.
 - Record tamper-evident della baseline: `docs/M1_TEACHER_BASELINE_EVIDENCE.md`.
 - Null empirico della sorgente reale catturato e replayato senza modello: `docs/M1_SOURCE_MEASUREMENT_NULL.md`.
 - Contratto A congelato in `contracts/m1-transition-a-v1.json`: detectability, materialita, stati scientifici e stati tecnici restano separati.
-- Prossima fase: implementare l'export ONNX FP32 soltanto contro questo contratto congelato.
+- Transition A ONNX FP32 implementata, catturata e replay-verificata con esito `PASS`: `docs/M1_TRANSITION_A_EVIDENCE.md`.
+- Prossima fase: qualificare separatamente Transition B ONNX FP32 -> ONNX INT8; CUDA resta `unverified` e nessuna quantizzazione e stata ancora eseguita.
 
 ## Pre-implementation quality gate
 
