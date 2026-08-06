@@ -148,4 +148,6 @@ Per ogni transizione valutare (entro il contratto dichiarato):
   `codex/m1-plan-freeze-fix`
 - Base M0 verificata:
   `3418b7d612adfd2bd81045dd4843cf5904192b5f`
-- Nessuna implementazione M1 è ancora iniziata.
+- M1.1 e implementata: materializzatore offline, cattura baseline PyTorch FP32 e replay senza rerun del modello.
+- Baseline teacher reale registrata in `docs/M1_TEACHER_BASELINE_EVIDENCE.md`.
+- Nessun export ONNX o percorso di quantizzazione e ancora iniziato.

@@ -99,7 +99,7 @@ def _load_source_manifest(path: Path) -> tuple[dict[str, Any], bytes]:
         raise _blocked("SOURCE_MANIFEST_INVALID", f"cannot decode source manifest: {exc}") from exc
     if not isinstance(payload, dict):
         raise _blocked("SOURCE_MANIFEST_INVALID", "source manifest root must be an object")
-    return payload, raw
+    return payload, canonical_json_bytes(payload)
 
 
 def _validate_zip_member(name: str) -> PurePosixPath:

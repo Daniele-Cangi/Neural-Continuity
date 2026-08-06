@@ -140,3 +140,26 @@ neural-continuity-materialize `
 Un'esecuzione valida produce `materialized_unqualified`, i sei ruoli, il corpus
 canonico, attribution metadata e `materialization-manifest.json`. Non eseguire ancora
 export ONNX o quantizzazione.
+
+## 9) Qualifica teacher reale
+
+Il teacher FP32 puo essere catturato soltanto dal package materializzato e verificato.
+Il comando seguente usa esclusivamente cache locale e registra embedding, ranking,
+metriche, inventario del teacher e bundle di replay.
+
+```powershell
+neural-continuity-m1-teacher-evidence capture `
+  --config experiments/m1-teacher-evidence.yaml `
+  --dataset <DIRECTORY_MATERIALIZZATA> `
+  --output <NUOVA_DIRECTORY_EVIDENCE>
+```
+
+Il replay non costruisce il modello:
+
+```powershell
+neural-continuity-m1-teacher-evidence replay `
+  --bundle <DIRECTORY_EVIDENCE>\replay-bundle.json
+```
+
+Un replay `PASS` qualifica il pacchetto baseline del teacher, ma non produce una
+decisione sulla transizione A o B.

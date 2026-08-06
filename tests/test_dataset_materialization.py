@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import zipfile
 from pathlib import Path
 
@@ -196,3 +197,13 @@ def test_materialization_does_not_overwrite_existing_output(tmp_path: Path):
         materialize_dataset(manifest_path, archive_path, output)
 
     assert error.value.code == "OUTPUT_ALREADY_EXISTS"
+
+
+def test_materialization_uses_canonical_source_manifest_identity(tmp_path: Path):
+    manifest_path, archive_path = _source_package(tmp_path)
+    first = materialize_dataset(manifest_path, archive_path, tmp_path / "first")
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    second = materialize_dataset(manifest_path, archive_path, tmp_path / "second")
+
+    assert first == second

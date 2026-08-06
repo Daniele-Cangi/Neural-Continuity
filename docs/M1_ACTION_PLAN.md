@@ -360,8 +360,10 @@ Vedi sezione 12.
 ## 14) Stato della guida e passaggio a implementazione
 
 - `M1_RESEARCH_GUIDE.md` allineata con terminologia M0 (`negative` vs `material-negative`).
-- Nessun codice implementativo introdotto.
-- Prossima fase: revisione M1 plan dopo disponibilità dipendenze `torch/onnx/sentence-transformers`.
+- M1.1 implementata: materializzazione offline fail-closed, teacher baseline FP32 e replay senza modello.
+- L'evidence run qualificabile usa Python `3.12.10`, PyTorch `2.10.0+cpu` e Sentence Transformers `5.6.1` in ambiente isolato; CUDA resta `unverified`.
+- Record tamper-evident della baseline: `docs/M1_TEACHER_BASELINE_EVIDENCE.md`.
+- Prossima fase: definire e congelare il contratto della transizione A prima dell'export ONNX.
 
 ## Pre-implementation quality gate
 
