@@ -6,6 +6,7 @@ import os
 import shutil
 import tempfile
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,14 @@ from neural_continuity.m1_teacher_evidence import (
 )
 
 _CANONICAL_ORDER = "query ID ascending by UTF-8 bytes"
+
+
+@dataclass(frozen=True)
+class VerifiedCalibrationInputs:
+    query_ids: list[str]
+    query_texts: list[str]
+    manifest_sha256: str
+    inputs_sha256: str
 
 
 def _require_sha256(value: object, field: str) -> str:
@@ -147,6 +156,29 @@ def verify_calibration_package(package_directory: str | Path) -> dict[str, Any]:
             "calibration inputs are invalid or non-canonical",
         )
     return {"status": "PASS", "query_count": len(records), "model_execution_used": False}
+
+
+def load_verified_calibration_inputs(
+    package_directory: str | Path, contract_path: str | Path
+) -> VerifiedCalibrationInputs:
+    contract, contract_sha256 = _load_contract(contract_path)
+    root = Path(package_directory).resolve()
+    verify_calibration_package(root)
+    manifest_path = root / "calibration-manifest.json"
+    manifest = _load_json(manifest_path, "CALIBRATION_MANIFEST_INVALID")
+    if (
+        manifest.get("contract_id") != contract["contract_id"]
+        or manifest.get("contract_sha256") != contract_sha256
+    ):
+        raise _fail("CALIBRATION_CONTRACT_MISMATCH", "package contract identity differs")
+    inputs_path = root / "calibration-inputs.jsonl"
+    records = [json.loads(line) for line in inputs_path.read_text(encoding="utf-8").splitlines()]
+    return VerifiedCalibrationInputs(
+        query_ids=[record["query_id"] for record in records],
+        query_texts=[record["text"] for record in records],
+        manifest_sha256=sha256_file(manifest_path),
+        inputs_sha256=sha256_file(inputs_path),
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:

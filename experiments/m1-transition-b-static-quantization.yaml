@@ -1,0 +1,28 @@
+experiment_name: M1_TRANSITION_B_STATIC_QDQ_CANDIDATE_V1
+
+evidence_scope:
+  classification: static_qdq_candidate_capture
+  qualifying_m1_evidence: false
+  limitation: creates the frozen ONNX INT8 candidate only; it does not capture target observations or decide Transition B
+
+contract_path: contracts/m1-transition-b-v1.json
+
+model:
+  model_id: sentence-transformers/all-MiniLM-L6-v2
+  revision: 1110a243fdf4706b3f48f1d95db1a4f5529b4d41
+  device: cpu
+  cache_only: true
+  output_dtype: float32
+
+evaluation:
+  top_k: 10
+
+quantization:
+  mode: static
+  quantization_format: QDQ
+  activation_type: QUInt8
+  weight_type: QInt8
+  per_channel: true
+  calibration_method: MinMax
+  calibration_batch_size: 32
+  execution_provider: CPUExecutionProvider
