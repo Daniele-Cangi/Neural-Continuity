@@ -363,7 +363,8 @@ Vedi sezione 12.
 - M1.1 implementata: materializzazione offline fail-closed, teacher baseline FP32 e replay senza modello.
 - L'evidence run qualificabile usa Python `3.12.10`, PyTorch `2.10.0+cpu` e Sentence Transformers `5.6.1` in ambiente isolato; CUDA resta `unverified`.
 - Record tamper-evident della baseline: `docs/M1_TEACHER_BASELINE_EVIDENCE.md`.
-- Prossima fase: definire e congelare il contratto della transizione A prima dell'export ONNX.
+- Null empirico della sorgente reale catturato e replayato senza modello: `docs/M1_SOURCE_MEASUREMENT_NULL.md`.
+- Prossima fase: definire e congelare il contratto della transizione A usando il null misurato, senza esportare ancora ONNX.
 
 ## Pre-implementation quality gate
 
