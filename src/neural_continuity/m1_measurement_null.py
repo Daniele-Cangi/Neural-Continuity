@@ -374,6 +374,8 @@ def write_measurement_null_package(
     evidence_scope: Mapping[str, Any],
     config_sha256: str,
     top_k: int,
+    source_identity: Mapping[str, Any] | None = None,
+    evidence_kind: str = "real_teacher_measurement_null",
 ) -> dict[str, Any]:
     output_path = Path(output_directory).resolve()
     if output_path.exists():
@@ -383,6 +385,8 @@ def write_measurement_null_package(
             "MEASUREMENT_NULL_OBSERVATION_INVALID", "source run IDs are empty or duplicated"
         )
     report, rankings = _report(runs, top_k)
+    if source_identity is not None:
+        report["source_identity"] = dict(source_identity)
     temporary_path = Path(
         tempfile.mkdtemp(prefix=f".{output_path.name}.building-", dir=output_path.parent)
     )
@@ -401,6 +405,7 @@ def write_measurement_null_package(
             "measurement_null_format_version": MEASUREMENT_NULL_FORMAT_VERSION,
             "evidence_scope": dict(evidence_scope),
             "configuration_sha256": config_sha256,
+            "source_identity": dict(source_identity) if source_identity is not None else None,
             "dataset": {
                 "dataset_id": dataset.dataset_id,
                 "materialization_manifest_sha256": dataset.manifest_sha256,
@@ -447,7 +452,7 @@ def write_measurement_null_package(
             "evidence_status": "CAPTURED_PENDING_REPLAY",
             "qualifying_m1_evidence": bool(evidence_scope.get("qualifying_m1_evidence")),
             "dataset_id": dataset.dataset_id,
-            "evidence_kind": "real_teacher_measurement_null",
+            "evidence_kind": evidence_kind,
             "artifacts": artifacts,
             "integrity": {
                 "artifact_hash_algorithm": "SHA-256",
@@ -668,6 +673,9 @@ def replay_measurement_null(bundle_path: str | Path) -> dict[str, Any]:
     evaluation = _require_mapping(bundle.get("evaluation"), "evaluation")
     top_k = _positive_int(evaluation.get("top_k"), "evaluation.top_k")
     report, rankings = _report(runs, top_k)
+    source_identity = bundle.get("source_identity")
+    if source_identity is not None:
+        report["source_identity"] = dict(_require_mapping(source_identity, "source_identity"))
     rankings_path = _safe_artifact_path(
         root, _require_string(evaluation.get("ranking_path"), "evaluation.ranking_path")
     )

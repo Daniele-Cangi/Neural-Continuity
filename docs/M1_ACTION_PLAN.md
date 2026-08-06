@@ -367,7 +367,8 @@ Vedi sezione 12.
 - Contratto A congelato in `contracts/m1-transition-a-v1.json`: detectability, materialita, stati scientifici e stati tecnici restano separati.
 - Transition A ONNX FP32 implementata, catturata e replay-verificata con esito `PASS`: `docs/M1_TRANSITION_A_EVIDENCE.md`.
 - Contratto B e protocollo di calibrazione congelati: `contracts/m1-transition-b-v1.json` e `docs/M1_TRANSITION_B_PROTOCOL.md`.
-- Prossima fase: catturare il null empirico dell'ONNX FP32 sorgente; CUDA resta `unverified` e nessuna quantizzazione e stata ancora eseguita.
+- Null empirico ONNX FP32 catturato e replayato senza modello: `docs/M1_ONNX_FP32_NULL_EVIDENCE.md`.
+- Prossima fase: implementare la calibrazione statica isolata; CUDA resta `unverified` e nessuna quantizzazione e stata ancora eseguita.
 
 ## Pre-implementation quality gate
 

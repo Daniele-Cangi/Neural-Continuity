@@ -84,6 +84,12 @@ def _write_package(tmp_path: Path) -> Path:
         evidence_scope={"classification": "test", "qualifying_m1_evidence": False},
         config_sha256="d" * 64,
         top_k=2,
+        source_identity={
+            "transition_a_evidence_manifest_sha256": "a" * 64,
+            "onnx_fp32_artifact_sha256": "b" * 64,
+            "execution_provider": "CPUExecutionProvider",
+        },
+        evidence_kind="onnx_fp32_measurement_null",
     )
     return output
 
@@ -110,6 +116,10 @@ def test_replay_reconstructs_source_only_measurement_null_without_model(tmp_path
         BATCH_SIZE_VARIATION_FAMILY,
     }
     assert report["operational_tolerance"] == "NOT_SELECTED"
+    evidence_manifest = json.loads((output / "evidence-manifest.json").read_text(encoding="utf-8"))
+    replay_bundle = json.loads((output / "replay-bundle.json").read_text(encoding="utf-8"))
+    assert evidence_manifest["evidence_kind"] == "onnx_fp32_measurement_null"
+    assert replay_bundle["source_identity"]["execution_provider"] == "CPUExecutionProvider"
 
 
 def test_replay_fails_closed_when_a_declared_source_run_is_missing(tmp_path: Path):
