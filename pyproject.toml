@@ -35,6 +35,7 @@ neural-continuity-m1-onnx-null = "neural_continuity.m1_b.onnx_null:main"
 neural-continuity-m1-calibration = "neural_continuity.m1_b.calibration_data:main"
 neural-continuity-m1-static-quantization = "neural_continuity.m1_b.static_quantization:main"
 neural-continuity-m1-int8-observation = "neural_continuity.m1_b.onnx_int8_observation:main"
+neural-continuity-m1-fp32-observation = "neural_continuity.m1_b.onnx_fp32_observation:main"
 
 [project.urls]
 Homepage = "https://example.com/neural-continuity"
