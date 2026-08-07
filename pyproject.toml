@@ -38,6 +38,7 @@ neural-continuity-m1-int8-observation = "neural_continuity.m1_b.onnx_int8_observ
 neural-continuity-m1-fp32-observation = "neural_continuity.m1_b.onnx_fp32_observation:main"
 neural-continuity-m1-observation-compatibility = "neural_continuity.m1_b.paired_observation_compatibility:main"
 neural-continuity-m1-pure-comparison = "neural_continuity.m1_b.pure_comparison:main"
+neural-continuity-m1-transition-b-decision = "neural_continuity.m1_b.decision_package:main"
 
 [project.urls]
 Homepage = "https://example.com/neural-continuity"
