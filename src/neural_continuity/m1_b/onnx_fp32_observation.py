@@ -126,10 +126,21 @@ def capture_fp32_source_observation(
             "contract_id": contract["contract_id"],
             "contract_sha256": sha256_file(Path(contract_path)),
             "configuration_sha256": config_sha256,
+            "dataset": {
+                "dataset_id": dataset.dataset_id,
+                "materialization_manifest_sha256": dataset.manifest_sha256,
+                "materialization_policy_sha256": dataset.materialization_policy_sha256,
+                "partition_policy_sha256": dataset.partition_policy_sha256,
+            },
             "source_identity": {
                 "transition_a_evidence_manifest_sha256": source.transition_a_manifest_sha256,
                 "onnx_fp32_artifact_sha256": source.artifact_sha256,
                 "execution_provider": source.execution_provider,
+            },
+            "teacher_tokenizer_identity": {
+                **teacher_manifest,
+                "configuration_sha256": config_sha256,
+                "source_execution_used": "ONNX FP32 only",
             },
             "artifacts": sorted(artifacts, key=lambda entry: entry["path"]),
         }
