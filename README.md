@@ -1,6 +1,7 @@
 # neural-continuity
 
-`neural-continuity` is a small, explicit measurement repository for an M0 continuity milestone.
+`neural-continuity` is a small, explicit measurement repository for controlled
+model-continuity milestones.
 
 ## Thesis
 
@@ -14,7 +15,20 @@ Outcomes are constrained to:
 - `FAIL`
 - `INCONCLUSIVE`
 
-## Scope (M0)
+## Current status
+
+- M0 measurement integrity is complete and replay-verified.
+- M1 Transition A (`PyTorch FP32 → ONNX FP32`) passed under its frozen contract.
+- M1 Transition B evaluated one frozen static-QDQ ONNX INT8 candidate. The technical
+  pipeline and model-free replay passed, but the scientific result is `FAIL` because
+  functional limits were exceeded. This is evidence for that candidate and protocol,
+  not a universal claim about INT8 quantization.
+
+The failed candidate is not to be regenerated, retuned, or re-evaluated by changing
+thresholds within the same evidence slice.  A further candidate requires a separately
+versioned contract and experiment.
+
+## M0-specific scope
 
 M0 only implements `M0_MEASUREMENT_INTEGRITY`.
 It proves the measurement system can distinguish:
@@ -90,4 +104,3 @@ The project does not claim:
 - guaranteed safety,
 - production-readiness,
 - complete OOD behavior coverage.
-

@@ -1,5 +1,10 @@
 # M1 Action Plan — Verified Quantization
 
+> **Historical plan and current closure record.** The implementation phases below were
+> completed for one frozen candidate. Transition A passed; Transition B produced a
+> replay-verified scientific `FAIL`. The authoritative final evidence is
+> `docs/M1_TRANSITION_B_DECISION.md`.
+
 ## 1) Scope e vincoli
 
 La milestone M1 definisce il percorso per misurare due transizioni reali:
@@ -7,8 +12,9 @@ La milestone M1 definisce il percorso per misurare due transizioni reali:
 - `PyTorch FP32 → ONNX FP32`
 - `ONNX FP32 → ONNX INT8`
 
-M1 non include implementazioni operative, tuning automatico o ricerca ad hoc.
-Il piano è documentale e non modifica comportamento M0 prima di un ciclo esplicito di implementazione separato.
+M1 non include tuning automatico o ricerca ad hoc. L'implementazione operativa delle
+fasi elencate è stata completata senza modificare i principi M0. Il presente documento
+mantiene il piano e registra il confine della chiusura del primo candidato.
 
 ## 2) Stato iniziale e non-scope
 
@@ -357,18 +363,27 @@ Vedi sezione 12.
 
 `Load the cached real teacher, capture a canonical PyTorch FP32 observation, and prove that the resulting evidence can be replayed.`
 
-## 14) Stato della guida e passaggio a implementazione
+## 14) Stato della guida e chiusura del primo candidato
 
-- `M1_RESEARCH_GUIDE.md` allineata con terminologia M0 (`negative` vs `material-negative`).
-- M1.1 implementata: materializzazione offline fail-closed, teacher baseline FP32 e replay senza modello.
-- L'evidence run qualificabile usa Python `3.12.10`, PyTorch `2.10.0+cpu` e Sentence Transformers `5.6.1` in ambiente isolato; CUDA resta `unverified`.
-- Record tamper-evident della baseline: `docs/M1_TEACHER_BASELINE_EVIDENCE.md`.
-- Null empirico della sorgente reale catturato e replayato senza modello: `docs/M1_SOURCE_MEASUREMENT_NULL.md`.
-- Contratto A congelato in `contracts/m1-transition-a-v1.json`: detectability, materialita, stati scientifici e stati tecnici restano separati.
-- Transition A ONNX FP32 implementata, catturata e replay-verificata con esito `PASS`: `docs/M1_TRANSITION_A_EVIDENCE.md`.
-- Contratto B e protocollo di calibrazione congelati: `contracts/m1-transition-b-v1.json` e `docs/M1_TRANSITION_B_PROTOCOL.md`.
-- Null empirico ONNX FP32 catturato e replayato senza modello: `docs/M1_ONNX_FP32_NULL_EVIDENCE.md`.
-- Prossima fase: implementare la calibrazione statica isolata; CUDA resta `unverified` e nessuna quantizzazione e stata ancora eseguita.
+- `M1_RESEARCH_GUIDE.md` è allineata alla terminologia M0 (`negative` vs
+  `material-negative`) e allo stato conclusivo delle transizioni.
+- Il run qualificabile usa Python `3.12.10`, PyTorch `2.10.0+cpu` e Sentence
+  Transformers `5.6.1` in ambiente isolato; CUDA resta `unverified`.
+- Baseline e null PyTorch FP32 sono tamper-evident e replay-verificati in
+  `docs/M1_TEACHER_BASELINE_EVIDENCE.md` e `docs/M1_SOURCE_MEASUREMENT_NULL.md`.
+- Transition A è stata catturata e replay-verificata con esito `PASS`:
+  `docs/M1_TRANSITION_A_EVIDENCE.md`.
+- Il contratto B, il null ONNX FP32, la calibrazione isolata e il candidato static-QDQ
+  sono registrati in `contracts/m1-transition-b-v1.json`,
+  `docs/M1_ONNX_FP32_NULL_EVIDENCE.md`, `docs/M1_STATIC_CALIBRATION_EVIDENCE.md` e
+  `docs/M1_STATIC_QDQ_CANDIDATE.md`.
+- Transition B ha esito tecnico `PASS`, integrità di misura `VALID`, replay model-free
+  `PASS` e risultato scientifico `FAIL` per il candidato congelato:
+  `docs/M1_TRANSITION_B_DECISION.md`.
+- Non rimane una fase M1 autorizzata per questo candidato. Non si possono rigenerare
+  candidate, cambiare calibrazione o soglie, né reinterpretare il risultato nella
+  stessa slice. Un eventuale esperimento successivo richiede un nuovo contratto
+  versionato, una nuova identita di candidato e una decisione di governance esplicita.
 
 ## Pre-implementation quality gate
 
