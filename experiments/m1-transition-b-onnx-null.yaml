@@ -1,0 +1,28 @@
+experiment_name: M1_TRANSITION_B_ONNX_FP32_MEASUREMENT_NULL_V1
+
+evidence_scope:
+  classification: onnx_fp32_measurement_null
+  qualifying_m1_evidence: true
+  limitation: source-only ONNX FP32 detection evidence; no INT8 candidate or Transition B decision is made
+
+contract_path: contracts/m1-transition-b-v1.json
+
+dataset:
+  dataset_id: nc-m1-beir-scifact-v1
+
+model:
+  model_id: sentence-transformers/all-MiniLM-L6-v2
+  revision: 1110a243fdf4706b3f48f1d95db1a4f5529b4d41
+  device: cpu
+  cache_only: true
+  output_dtype: float32
+
+evaluation:
+  top_k: 10
+
+measurement_null:
+  repeated_inference:
+    count: 3
+    batch_size: 64
+  batch_size_variation:
+    batch_sizes: [1, 16, 64]

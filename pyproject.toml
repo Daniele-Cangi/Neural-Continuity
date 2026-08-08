@@ -22,10 +22,23 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest>=8.0", "pytest-cov>=5.0"]
 sentence-transformers = ["sentence-transformers>=2.6"]
+onnx = ["onnx>=1.16", "onnxruntime>=1.18", "onnxscript>=0.1"]
 dev = ["ruff>=0.6", "black>=24.0", "mypy>=1.10"]
 
 [project.scripts]
 neural-continuity = "neural_continuity.cli:main"
+neural-continuity-materialize = "neural_continuity.dataset_materialization:main"
+neural-continuity-m1-teacher-evidence = "neural_continuity.m1_teacher_evidence:main"
+neural-continuity-m1-measurement-null = "neural_continuity.m1_measurement_null:main"
+neural-continuity-m1-transition-a = "neural_continuity.m1_onnx_transition:main"
+neural-continuity-m1-onnx-null = "neural_continuity.m1_b.onnx_null:main"
+neural-continuity-m1-calibration = "neural_continuity.m1_b.calibration_data:main"
+neural-continuity-m1-static-quantization = "neural_continuity.m1_b.static_quantization:main"
+neural-continuity-m1-int8-observation = "neural_continuity.m1_b.onnx_int8_observation:main"
+neural-continuity-m1-fp32-observation = "neural_continuity.m1_b.onnx_fp32_observation:main"
+neural-continuity-m1-observation-compatibility = "neural_continuity.m1_b.paired_observation_compatibility:main"
+neural-continuity-m1-pure-comparison = "neural_continuity.m1_b.pure_comparison:main"
+neural-continuity-m1-transition-b-decision = "neural_continuity.m1_b.decision_package:main"
 
 [project.urls]
 Homepage = "https://example.com/neural-continuity"
@@ -56,5 +69,16 @@ warn_unused_ignores = true
 disallow_untyped_defs = false
 
 [[tool.mypy.overrides]]
-module = ["torch", "torch.*", "pandas", "psutil", "yaml", "scipy", "scipy.*"]
+module = [
+  "torch",
+  "torch.*",
+  "onnx",
+  "onnxruntime",
+  "onnxruntime.*",
+  "pandas",
+  "psutil",
+  "yaml",
+  "scipy",
+  "scipy.*"
+]
 ignore_missing_imports = true

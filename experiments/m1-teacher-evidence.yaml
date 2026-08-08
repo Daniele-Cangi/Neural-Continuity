@@ -1,0 +1,20 @@
+experiment_name: M1_REAL_TEACHER_BASELINE_V1
+
+evidence_scope:
+  classification: real_teacher_baseline
+  qualifying_m1_evidence: true
+  limitation: establishes the frozen PyTorch FP32 source baseline only; no transition decision is made
+
+dataset:
+  dataset_id: nc-m1-beir-scifact-v1
+
+model:
+  model_id: sentence-transformers/all-MiniLM-L6-v2
+  revision: 1110a243fdf4706b3f48f1d95db1a4f5529b4d41
+  device: cpu
+  cache_only: true
+  output_dtype: float32
+
+evaluation:
+  batch_size: 64
+  top_k: 10

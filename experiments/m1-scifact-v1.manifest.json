@@ -1,0 +1,168 @@
+{
+  "manifest_format_version": "1.0.0",
+  "dataset_id": "nc-m1-beir-scifact-v1",
+  "qualification_state": "specified_not_materialized",
+  "qualifying_m1_evidence": false,
+  "claim_boundary": "English scientific-claim retrieval against the frozen SciFact abstract corpus.",
+  "authority": {
+    "protocol": "../docs/M1_DATASET_PROTOCOL.md",
+    "tamper_evident_not_immutable": true,
+    "fail_closed": true
+  },
+  "source": {
+    "dataset_name": "SciFact",
+    "distribution": "BEIR scifact",
+    "download_url": "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/scifact.zip",
+    "upstream_dataset_url": "https://github.com/allenai/scifact",
+    "distribution_catalog_url": "https://github.com/beir-cellar/beir/wiki/Datasets-available",
+    "acquired_on": "2026-08-05",
+    "archive": {
+      "path": "scifact.zip",
+      "sha256": "536e14446a0ba56ed1398ab1055f39fe852686ecad24a6306c80c490fa8e0165",
+      "upstream_md5_non_authoritative": "5f7d1de60b170fc8027bb7898e2efca1"
+    },
+    "files": [
+      {
+        "path": "corpus.jsonl",
+        "size_bytes": 8106566,
+        "sha256": "dec31c8182f3d744c7d2c09423756fd1d17cbef75808db13ba01cc0aab4d1ac6"
+      },
+      {
+        "path": "queries.jsonl",
+        "size_bytes": 209731,
+        "sha256": "8ff84a7c903f722981cd8d595c022660140c51867b27608a6d4910db86080313"
+      },
+      {
+        "path": "qrels/train.tsv",
+        "size_bytes": 14502,
+        "sha256": "a53f2114831916c096b6c37d9e54da68cef4efdcdbd5ed46533601af972acf1d"
+      },
+      {
+        "path": "qrels/test.tsv",
+        "size_bytes": 5389,
+        "sha256": "0864bb985e0ca2367ba217977e72004d549054b2b06666ed9d4825ac7c21284c"
+      }
+    ],
+    "expected_counts": {
+      "corpus_documents": 5183,
+      "queries": 1109,
+      "train_qrel_rows": 919,
+      "train_queries_with_qrels": 809,
+      "test_qrel_rows": 339,
+      "test_queries_with_qrels": 300
+    }
+  },
+  "licenses": [
+    {
+      "applies_to": "queries and relevance annotations",
+      "license": "CC-BY-4.0",
+      "authority_url": "https://github.com/allenai/scifact/blob/master/LICENSE.md"
+    },
+    {
+      "applies_to": "corpus abstracts from S2ORC",
+      "license": "ODC-By-1.0",
+      "authority_url": "https://github.com/allenai/scifact/blob/master/LICENSE.md"
+    }
+  ],
+  "materialization": {
+    "encoding": "UTF-8",
+    "query_text": "queries.jsonl:text",
+    "document_text": "title + U+000A + text when title is non-empty; otherwise text",
+    "text_normalization": "none",
+    "relevance_rule": "qrel score > 0",
+    "candidate_corpus": "all 5183 corpus documents",
+    "ranking_tie_break": "document_id ascending",
+    "identifier_type": "opaque string"
+  },
+  "partition": {
+    "assignment_unit": "query_id",
+    "domain_separator": "neural-continuity:m1:scifact:v1",
+    "digest_expression": "sha256(utf8(domain_separator + ':' + upstream_split + ':' + query_id))",
+    "ordering": "digest ascending, then query_id ascending as UTF-8 bytes",
+    "rebalance_allowed": false,
+    "shared_retrieval_corpus_is_not_calibration_data": true,
+    "roles": [
+      {
+        "name": "measurement_null",
+        "upstream_split": "train",
+        "start_inclusive": 0,
+        "end_exclusive": 81,
+        "query_count": 81,
+        "promotion_evidence": false
+      },
+      {
+        "name": "quantization_calibration",
+        "upstream_split": "train",
+        "start_inclusive": 81,
+        "end_exclusive": 243,
+        "query_count": 162,
+        "promotion_evidence": false,
+        "allowed_inputs": "query text only"
+      },
+      {
+        "name": "contract_development",
+        "upstream_split": "train",
+        "start_inclusive": 243,
+        "end_exclusive": 607,
+        "query_count": 364,
+        "promotion_evidence": false
+      },
+      {
+        "name": "validation",
+        "upstream_split": "train",
+        "start_inclusive": 607,
+        "end_exclusive": 809,
+        "query_count": 202,
+        "promotion_evidence": false
+      },
+      {
+        "name": "frozen_critical",
+        "upstream_split": "test",
+        "start_inclusive": 0,
+        "end_exclusive": 60,
+        "query_count": 60,
+        "promotion_evidence": true
+      },
+      {
+        "name": "final_holdout",
+        "upstream_split": "test",
+        "start_inclusive": 60,
+        "end_exclusive": 300,
+        "query_count": 240,
+        "promotion_evidence": true
+      }
+    ]
+  },
+  "use_policy": {
+    "threshold_sources": [
+      "measurement_null",
+      "contract_development teacher-only evidence"
+    ],
+    "threshold_forbidden_sources": [
+      "quantization_calibration",
+      "validation",
+      "frozen_critical",
+      "final_holdout",
+      "candidate outcomes"
+    ],
+    "candidate_and_contract_must_be_frozen_before": [
+      "frozen_critical",
+      "final_holdout"
+    ],
+    "technical_error_is_scientific_fail": false
+  },
+  "qualification_gate": {
+    "required_before_use": [
+      "source hashes verified",
+      "source counts and schema verified",
+      "query IDs unique",
+      "qrels resolve to existing query and document IDs",
+      "role membership disjoint and exhaustive",
+      "derived artifacts hashed in a materialization manifest",
+      "license attribution packaged",
+      "teacher identity and preprocessing frozen",
+      "canonical observation package replayed without model execution"
+    ],
+    "missing_requirement_status": "BLOCKED"
+  }
+}

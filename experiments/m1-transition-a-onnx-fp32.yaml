@@ -1,0 +1,28 @@
+experiment_name: M1_TRANSITION_A_ONNX_FP32_V1
+
+evidence_scope:
+  classification: real_teacher_transition_a
+  qualifying_m1_evidence: true
+  limitation: evaluates only PyTorch FP32 to ONNX FP32 on the frozen CPU teacher; no quantization is performed
+
+contract_path: contracts/m1-transition-a-v1.json
+
+dataset:
+  dataset_id: nc-m1-beir-scifact-v1
+
+model:
+  model_id: sentence-transformers/all-MiniLM-L6-v2
+  revision: 1110a243fdf4706b3f48f1d95db1a4f5529b4d41
+  device: cpu
+  cache_only: true
+  output_dtype: float32
+
+evaluation:
+  top_k: 10
+
+onnx:
+  opset_version: 18
+  execution_provider: CPUExecutionProvider
+
+transition_a:
+  batch_sizes: [1, 16, 64]

@@ -148,4 +148,18 @@ Per ogni transizione valutare (entro il contratto dichiarato):
   `codex/m1-plan-freeze-fix`
 - Base M0 verificata:
   `3418b7d612adfd2bd81045dd4843cf5904192b5f`
-- Nessuna implementazione M1 è ancora iniziata.
+- La pipeline M1 è implementata con componenti separati per materializzazione dataset, evidenza
+  teacher, export ONNX, null empirici, calibrazione isolata, quantizzazione statica,
+  osservazione, confronto puro, decisione e replay model-free.
+- La baseline teacher reale e il null PyTorch FP32 sono registrati rispettivamente in
+  `docs/M1_TEACHER_BASELINE_EVIDENCE.md` e `docs/M1_SOURCE_MEASUREMENT_NULL.md`.
+- Transition A (`PyTorch FP32 -> ONNX FP32`) è `PASS`, con evidenza e replay in
+  `docs/M1_TRANSITION_A_EVIDENCE.md`.
+- Transition B ha misurato il candidato static-QDQ congelato. La pipeline tecnica e
+  l'integrità di misura sono valide e il replay è `PASS`, ma il risultato scientifico
+  è `FAIL` per superamento dei limiti funzionali. Il registro versionato della decisione
+  e dell'identità del bundle è `docs/M1_TRANSITION_B_DECISION.md`; il bundle
+  tamper-evident identificato dal relativo manifest SHA-256 resta l'evidenza primaria.
+- Il candidato B e il contratto `m1-transition-b-v1` restano congelati: non sono
+  autorizzati rerun che cambino soglie, calibrazione o candidato. Un nuovo esperimento
+  richiede un contratto versionato distinto e una decisione di governance esplicita.
