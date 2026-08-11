@@ -25,8 +25,13 @@ Outcomes are constrained to:
   not a universal claim about INT8 quantization.
 
 The failed candidate is not to be regenerated, retuned, or re-evaluated by changing
-thresholds within the same evidence slice.  A further candidate requires a separately
+thresholds within the same evidence slice. A further candidate requires a separately
 versioned contract and experiment.
+
+M1 closure records:
+
+- [M1 v1 evidence archive](docs/M1_EVIDENCE_ARCHIVE.md)
+- [Transition B v1 postmortem](docs/M1_TRANSITION_B_POSTMORTEM.md)
 
 ## M0-specific scope
 

@@ -1,0 +1,404 @@
+{
+  "schema_version": "1.0.0",
+  "archive_id": "m1-v1-77f31586ccc47cdbbe00afdcba149a8bd78c5a02",
+  "repository": "Daniele-Cangi/Neural-Continuity",
+  "repository_merge_commit": "77f31586ccc47cdbbe00afdcba149a8bd78c5a02",
+  "created_at_utc": "2026-08-11T08:38:59.8342947Z",
+  "integrity_model": "tamper-evident SHA-256 inventory; not physically immutable",
+  "restore_policy": "restore packages to their recorded original_path before invoking frozen replay bundles",
+  "package_count": 11,
+  "package_file_count": 53,
+  "package_bytes": 451868451,
+  "packages": [
+    {
+      "package_name": "nc-m1-scifact-v1-canonical-20260806",
+      "original_path": "C:\\tmp\\nc-m1-scifact-v1-canonical-20260806",
+      "archive_relative_path": "packages/nc-m1-scifact-v1-canonical-20260806",
+      "authority_file": "materialization-manifest.json",
+      "authority_sha256": "0746d98f5e69c6a0ee48ca3f47b342de1d968a877c90df26ffe8f893437fd5de",
+      "files": [
+        {
+          "path": "corpus.jsonl",
+          "size_bytes": 7974192,
+          "sha256": "58c378602a096373e00244657f12c693a5a02a333f893edb59d5349d699a524c"
+        },
+        {
+          "path": "materialization-manifest.json",
+          "size_bytes": 4657,
+          "sha256": "0746d98f5e69c6a0ee48ca3f47b342de1d968a877c90df26ffe8f893437fd5de"
+        },
+        {
+          "path": "source-notice.json",
+          "size_bytes": 567,
+          "sha256": "e972fb461f92e5a7e438ee057a1e5aba415902bd21a62cefd5494de633bcb013"
+        }
+      ]
+    },
+    {
+      "package_name": "nc-m1-scifact-v1-materialized-20260806",
+      "original_path": "C:\\tmp\\nc-m1-scifact-v1-materialized-20260806",
+      "archive_relative_path": "packages/nc-m1-scifact-v1-materialized-20260806",
+      "authority_file": "materialization-manifest.json",
+      "authority_sha256": "beab716b9f322478ca3f2efd0e6e93e7d66a2b3483ed098941cd9f2275bcdcc2",
+      "files": [
+        {
+          "path": "corpus.jsonl",
+          "size_bytes": 7974192,
+          "sha256": "58c378602a096373e00244657f12c693a5a02a333f893edb59d5349d699a524c"
+        },
+        {
+          "path": "materialization-manifest.json",
+          "size_bytes": 4657,
+          "sha256": "beab716b9f322478ca3f2efd0e6e93e7d66a2b3483ed098941cd9f2275bcdcc2"
+        },
+        {
+          "path": "source-notice.json",
+          "size_bytes": 567,
+          "sha256": "e972fb461f92e5a7e438ee057a1e5aba415902bd21a62cefd5494de633bcb013"
+        }
+      ]
+    },
+    {
+      "package_name": "nc-m1-teacher-baseline-py312-v2-20260806",
+      "original_path": "C:\\tmp\\nc-m1-teacher-baseline-py312-v2-20260806",
+      "archive_relative_path": "packages/nc-m1-teacher-baseline-py312-v2-20260806",
+      "authority_file": "evidence-manifest.json",
+      "authority_sha256": "9caae6846b59c40bea3fe08eff5d2f2edb00edd1b5d9ef10bc8f5c3854370c51",
+      "files": [
+        {
+          "path": "evidence-manifest.json",
+          "size_bytes": 920,
+          "sha256": "9caae6846b59c40bea3fe08eff5d2f2edb00edd1b5d9ef10bc8f5c3854370c51"
+        },
+        {
+          "path": "observations.npz",
+          "size_bytes": 8988517,
+          "sha256": "8882c98fcd21e0413da41b38fdc11a6cfd3694bae02b955aca5b161985f2f56c"
+        },
+        {
+          "path": "rankings.jsonl",
+          "size_bytes": 419514,
+          "sha256": "cb5e1884411c910976e9d303528ee0ab69192ddd9e13bb299f2002d55d818fde"
+        },
+        {
+          "path": "replay-bundle.json",
+          "size_bytes": 23448,
+          "sha256": "0779cc2a7bfedda7d8491fb587bcffc19992373ab4b41d71b13135b155524e88"
+        },
+        {
+          "path": "teacher-manifest.json",
+          "size_bytes": 2051,
+          "sha256": "ea629a04a00de513d65660f516d8b85fbd19d949d81d2d08464af65241e3a275"
+        },
+        {
+          "path": "teacher-metrics.json",
+          "size_bytes": 891,
+          "sha256": "7f43b6828e3be5843ddef47180f2c7c7b187c3936666d977b2b67d59e6f0eb88"
+        }
+      ]
+    },
+    {
+      "package_name": "nc-m1-source-null-20260806T163954",
+      "original_path": "C:\\tmp\\nc-m1-source-null-20260806T163954",
+      "archive_relative_path": "packages/nc-m1-source-null-20260806T163954",
+      "authority_file": "evidence-manifest.json",
+      "authority_sha256": "f3250f96577c1594b356c89252e3482e914f8b891d1bedbe84040206743a2f3d",
+      "files": [
+        {
+          "path": "comparison-report.json",
+          "size_bytes": 5098,
+          "sha256": "4b20290d2d57e36d1f3307a3aed244b80ca3ceafef0fa886db8546f189d0aaad"
+        },
+        {
+          "path": "evidence-manifest.json",
+          "size_bytes": 995,
+          "sha256": "f3250f96577c1594b356c89252e3482e914f8b891d1bedbe84040206743a2f3d"
+        },
+        {
+          "path": "replay-bundle.json",
+          "size_bytes": 3447,
+          "sha256": "3d2ed6f79890aa3e0cd0da2120757a9ee26d0a8a41f858f456221418b2ef2293"
+        },
+        {
+          "path": "source-null-observations.npz",
+          "size_bytes": 45003610,
+          "sha256": "72ff7de979e0d65a79363c83dd8f85e9cd2a890b46591dd86a1952c038c35412"
+        },
+        {
+          "path": "source-null-rankings.jsonl",
+          "size_bytes": 221263,
+          "sha256": "7776910383c65a828bd51e7ba2700f36d085791cc87c76c0bdb847d74f9a8fb3"
+        },
+        {
+          "path": "teacher-manifest.json",
+          "size_bytes": 2051,
+          "sha256": "de700bba010ed9225a4dcb2dc5481b647588c8166ba4518620c8a145a9e195b5"
+        }
+      ]
+    },
+    {
+      "package_name": "nc-m1-transition-a-20260806T193853",
+      "original_path": "C:\\tmp\\nc-m1-transition-a-20260806T193853",
+      "archive_relative_path": "packages/nc-m1-transition-a-20260806T193853",
+      "authority_file": "evidence-manifest.json",
+      "authority_sha256": "12566ccbcc7f3f74a799abca2189a9b0906efd44a0f038ce0dc7c44b7b87fc3a",
+      "files": [
+        {
+          "path": "comparison-report.json",
+          "size_bytes": 9520,
+          "sha256": "5ae1b95b1d9ef33028aca98955c0ad592e8a3b731bc4497d243e6ae1b8ddca90"
+        },
+        {
+          "path": "decision.json",
+          "size_bytes": 1406,
+          "sha256": "9d37990e05c3d3ce0a1fef878d8472fcd638b16dcdbafe22b5b55a9ce98fa7ec"
+        },
+        {
+          "path": "evidence-manifest.json",
+          "size_bytes": 1457,
+          "sha256": "12566ccbcc7f3f74a799abca2189a9b0906efd44a0f038ce0dc7c44b7b87fc3a"
+        },
+        {
+          "path": "onnx-manifest.json",
+          "size_bytes": 458,
+          "sha256": "51788194d0d0e22b6e730f4b1163954071948c8f5e8aac474758b75952063f6e"
+        },
+        {
+          "path": "replay-bundle.json",
+          "size_bytes": 23583,
+          "sha256": "f3b07edb75dbd3d4e469b08ea086156d6421735da47eec818b871a5d9196c1cb"
+        },
+        {
+          "path": "source-rankings.jsonl",
+          "size_bytes": 1348331,
+          "sha256": "630e167c0f629edcb585a3a348838135879e0438c1b78f06d5c0c7a3e7abdf97"
+        },
+        {
+          "path": "target-rankings.jsonl",
+          "size_bytes": 1348328,
+          "sha256": "de49645d82c6bbf47873da38b1a753b79892e651e59f0c2c97ad6375381a8dee"
+        },
+        {
+          "path": "teacher-manifest.json",
+          "size_bytes": 2136,
+          "sha256": "c7a4548f10bcf8229c70d5fa7ef8676c7f9b7b03e5a1a515f2dad093f43ed724"
+        },
+        {
+          "path": "teacher.onnx",
+          "size_bytes": 90381573,
+          "sha256": "5c0d999bd6b5e64e36cad1f61a83ef8e7507d55be49086745780fabb7c648511"
+        },
+        {
+          "path": "transition-observations.npz",
+          "size_bytes": 53781691,
+          "sha256": "a386a1a42c6342b71898d4b55c661ffc8f6cf63e1c56138189c7934dc30f2cda"
+        }
+      ]
+    },
+    {
+      "package_name": "nc-m1-onnx-null-20260806T211943",
+      "original_path": "C:\\tmp\\nc-m1-onnx-null-20260806T211943",
+      "archive_relative_path": "packages/nc-m1-onnx-null-20260806T211943",
+      "authority_file": "evidence-manifest.json",
+      "authority_sha256": "506ab742aac5abbb8558ce20e714d4d5baf2c3785bb17de0d9fbdb22ad84c123",
+      "files": [
+        {
+          "path": "comparison-report.json",
+          "size_bytes": 5576,
+          "sha256": "2e06e7acc87faa8a11436bde952761bba5dc97f96ce6b6d339c6ff91fc383710"
+        },
+        {
+          "path": "evidence-manifest.json",
+          "size_bytes": 992,
+          "sha256": "506ab742aac5abbb8558ce20e714d4d5baf2c3785bb17de0d9fbdb22ad84c123"
+        },
+        {
+          "path": "replay-bundle.json",
+          "size_bytes": 3808,
+          "sha256": "1076527bff249dd1b404fcc5525a54ddbd6a752cedbd2f3856e0da00ccb1e447"
+        },
+        {
+          "path": "source-null-observations.npz",
+          "size_bytes": 45002603,
+          "sha256": "39ac77680a06fe49b7190d823511ce9fe5807660624ee8ef0a1c12917adc813f"
+        },
+        {
+          "path": "source-null-rankings.jsonl",
+          "size_bytes": 221124,
+          "sha256": "a67b178f7aa5eca0d66dcbf941c2ce9522190e1c7eb784416971cc5a3fd9073b"
+        },
+        {
+          "path": "teacher-manifest.json",
+          "size_bytes": 2053,
+          "sha256": "c15461ac65d6e0be9c2ff09481d6e3d56765d96cab997970c9339d5d1e8306ee"
+        }
+      ]
+    },
+    {
+      "package_name": "nc-m1-static-calibration-20260806T224805",
+      "original_path": "C:\\tmp\\nc-m1-static-calibration-20260806T224805",
+      "archive_relative_path": "packages/nc-m1-static-calibration-20260806T224805",
+      "authority_file": "calibration-manifest.json",
+      "authority_sha256": "3ac7d68e01976ee444217cd80c5b4b7338f870d8c0ab5a350a960495baef0778",
+      "files": [
+        {
+          "path": "calibration-inputs.jsonl",
+          "size_bytes": 19793,
+          "sha256": "7aaecfdc1e4734ab360c66e12a43eea0896c53d3a3745346b5cf9edd46e8f522"
+        },
+        {
+          "path": "calibration-manifest.json",
+          "size_bytes": 735,
+          "sha256": "3ac7d68e01976ee444217cd80c5b4b7338f870d8c0ab5a350a960495baef0778"
+        }
+      ]
+    },
+    {
+      "package_name": "nc-m1-static-qdq-verified-20260806T230647",
+      "original_path": "C:\\tmp\\nc-m1-static-qdq-verified-20260806T230647",
+      "archive_relative_path": "packages/nc-m1-static-qdq-verified-20260806T230647",
+      "authority_file": "candidate-manifest.json",
+      "authority_sha256": "d11888e48e24a9e29f5bdfac48ad7ace4204fb7b101e3531faa0f11190ad562c",
+      "files": [
+        {
+          "path": "candidate-manifest.json",
+          "size_bytes": 3328,
+          "sha256": "d11888e48e24a9e29f5bdfac48ad7ace4204fb7b101e3531faa0f11190ad562c"
+        },
+        {
+          "path": "quantization-config.json",
+          "size_bytes": 451,
+          "sha256": "dcc9949f9a64de512cf43378db436c017e8d6870effe20b57d89cdecea740351"
+        },
+        {
+          "path": "teacher-int8-qdq.onnx",
+          "size_bytes": 23127366,
+          "sha256": "8b28688438e249c42b523e276333a3a009ca30d0754a3ba6fcbb10d76de873e5"
+        }
+      ]
+    },
+    {
+      "package_name": "nc-m1-int8-observation-20260806T232512",
+      "original_path": "C:\\tmp\\nc-m1-int8-observation-20260806T232512",
+      "archive_relative_path": "packages/nc-m1-int8-observation-20260806T232512",
+      "authority_file": "evidence-manifest.json",
+      "authority_sha256": "4027c1edf9f24254e6174ca79bc722c98758c8f97f5ad175b380866f64063a80",
+      "files": [
+        {
+          "path": "evidence-manifest.json",
+          "size_bytes": 3550,
+          "sha256": "4027c1edf9f24254e6174ca79bc722c98758c8f97f5ad175b380866f64063a80"
+        },
+        {
+          "path": "observation-metadata.json",
+          "size_bytes": 44648,
+          "sha256": "deb588652944bc13284e1585f740623212ed0c261431f6c0adc6d54ea7282a85"
+        },
+        {
+          "path": "replay-bundle.json",
+          "size_bytes": 433,
+          "sha256": "3e08ea7e0be8bfe2a17294d2da3685faa4957b40db5ba2f104ce24663f65951a"
+        },
+        {
+          "path": "target-observations.npz",
+          "size_bytes": 25421991,
+          "sha256": "9d460a1550e1dcac59f5031a477003839c4fc4be46e9dcde9ecaff5097927dba"
+        },
+        {
+          "path": "teacher-int8-qdq.onnx",
+          "size_bytes": 23127366,
+          "sha256": "8b28688438e249c42b523e276333a3a009ca30d0754a3ba6fcbb10d76de873e5"
+        }
+      ]
+    },
+    {
+      "package_name": "nc-m1-fp32-paired-source-20260807T101905",
+      "original_path": "C:\\tmp\\nc-m1-fp32-paired-source-20260807T101905",
+      "archive_relative_path": "packages/nc-m1-fp32-paired-source-20260807T101905",
+      "authority_file": "evidence-manifest.json",
+      "authority_sha256": "cf03882df0913e84b456b61f02a1c00a14ec151cd0fd9cc07f7d0bf04745b4df",
+      "files": [
+        {
+          "path": "evidence-manifest.json",
+          "size_bytes": 3420,
+          "sha256": "cf03882df0913e84b456b61f02a1c00a14ec151cd0fd9cc07f7d0bf04745b4df"
+        },
+        {
+          "path": "observation-metadata.json",
+          "size_bytes": 44648,
+          "sha256": "2d0a0a73784df7b42ea728450e021f6147e79ba83ecf12487839cdee407ef34e"
+        },
+        {
+          "path": "replay-bundle.json",
+          "size_bytes": 355,
+          "sha256": "8bf353abd156285d99d7b672d6014c1858a477cc872ae2ee8e6f002914c44232"
+        },
+        {
+          "path": "source-observations.npz",
+          "size_bytes": 26905547,
+          "sha256": "e1133b98bf7064bbd3374a9a8ce84feff0396a06bd74bc1137567d95f645ba02"
+        },
+        {
+          "path": "teacher-fp32.onnx",
+          "size_bytes": 90381573,
+          "sha256": "5c0d999bd6b5e64e36cad1f61a83ef8e7507d55be49086745780fabb7c648511"
+        }
+      ]
+    },
+    {
+      "package_name": "nc-m1-transition-b-decision-20260808T014916",
+      "original_path": "C:\\tmp\\nc-m1-transition-b-decision-20260808T014916",
+      "archive_relative_path": "packages/nc-m1-transition-b-decision-20260808T014916",
+      "authority_file": "evidence-manifest.json",
+      "authority_sha256": "eed7d7af553ae9aa77274104cc75f348de910df464d836272ab37e8760e78d4e",
+      "files": [
+        {
+          "path": "comparison-report.json",
+          "size_bytes": 10165,
+          "sha256": "96de4d708d40413338c4f6da03373fac39f383ee72cfaf00c8ada3461628b2c9"
+        },
+        {
+          "path": "decision.json",
+          "size_bytes": 5924,
+          "sha256": "49b520f4d341bab1138a33e64a99ad90c78439d6a13c195e3837043d9109759a"
+        },
+        {
+          "path": "evidence-manifest.json",
+          "size_bytes": 791,
+          "sha256": "eed7d7af553ae9aa77274104cc75f348de910df464d836272ab37e8760e78d4e"
+        },
+        {
+          "path": "replay-bundle.json",
+          "size_bytes": 1091,
+          "sha256": "499bbe08b3639ad89c621eba3b324ea22946873c96ece8568122b29ba203d606"
+        }
+      ]
+    }
+  ],
+  "contracts": [
+    {
+      "path": "contracts/m1-transition-a-v1.json",
+      "sha256": "0bb881c5379b155d13cfafc731299ae67e1843addb0b2357a5ce6a5354f72848",
+      "size_bytes": 6646
+    },
+    {
+      "path": "contracts/m1-transition-b-v1.json",
+      "sha256": "0acd1b0218b513ebbb6f9ab480f9305c746591b49a84577d09cb2e29c881c795",
+      "size_bytes": 5648
+    }
+  ],
+  "excluded_intermediates": [
+    {
+      "name": "nc-m1-fp32-observation-20260807T002914",
+      "reason": "superseded by canonical paired FP32 source package"
+    },
+    {
+      "name": "nc-m1-static-qdq-20260806T230404",
+      "reason": "unverified intermediate candidate"
+    },
+    {
+      "name": "nc-m1-cpu-py312",
+      "reason": "execution environment, not qualifying evidence"
+    }
+  ]
+}
