@@ -149,12 +149,3 @@ A measurement run can produce `runs/<run-id>/` artifacts including:
 
 Neural Continuity measures continuity only inside declared experiments, frozen contracts, observed datasets, and measured uncertainty.
 
-It does **not** claim:
-
-- universal neural equivalence;
-- certification or guaranteed safety;
-- complete out-of-distribution behavior coverage;
-- that one failed INT8 candidate proves general INT8 incompatibility;
-- production readiness for every model transformation class.
-
-The project reports where evidence supports continuity, where it falsifies it, and where the available evidence is not strong enough to decide.
