@@ -121,8 +121,39 @@ replacement values.
 ### 6.4 Probe planner
 
 The complete probe plan must be written and hashed before activation capture.
-It includes every unambiguously matched boundary immediately following a
-quantized compute path and the final embedding output.
+It includes every unambiguously matched:
+
+- boundary immediately before and after a quantized compute path;
+- normalization boundary;
+- attention or matrix-compute boundary;
+- pooling or reduction boundary on the final embedding path;
+- final embedding output.
+
+Each boundary receives one or more structural family labels from
+`QUANTIZED_COMPUTE`, `NORMALIZATION`, `ATTENTION_OR_MATMUL`, `OUTPUT_PATH`, and
+`FINAL_OUTPUT`. Labels are derived only from operator type, graph topology, and
+tensor lineage under these frozen rules:
+
+- `QUANTIZED_COMPUTE`: the boundary crosses `QLinear*`, `MatMulInteger`,
+  `ConvInteger`, or a `DequantizeLinear -> compute -> QuantizeLinear` path;
+- `NORMALIZATION`: the boundary crosses `BatchNormalization`,
+  `InstanceNormalization`, `LayerNormalization`, `LpNormalization`, or a
+  structural normalization subgraph that computes a norm or variance and then
+  divides or scales the same incoming lineage;
+- `ATTENTION_OR_MATMUL`: the boundary crosses `Attention`,
+  `MultiHeadAttention`, `MatMul`, `MatMulInteger`, `QLinearMatMul`, or `Gemm`;
+- `OUTPUT_PATH`: the boundary is at or downstream of the first `ReduceMean`,
+  `ReduceSum`, `ReduceMax`, `GlobalAveragePool`, or `GlobalMaxPool` that is an
+  ancestor of the final embedding output;
+- `FINAL_OUTPUT`: the boundary is the declared final embedding output.
+
+A structural normalization subgraph must be recognized from operator and edge
+patterns fixed in code before any activation capture; its exact matched nodes
+and rule identifier are recorded in the inventory. A final output downstream
+of an output-path reduction receives both `OUTPUT_PATH` and `FINAL_OUTPUT`.
+If a boundary required to evaluate a predeclared
+hypothesis cannot be matched unambiguously across the two graphs, the diagnostic
+returns `BLOCKED`; it cannot omit the boundary and still become `COMPLETE`.
 
 No probe may be added, removed, or reordered after any activation value is read.
 
@@ -142,6 +173,48 @@ queries. Record:
 - INT8 saturation counts when representable from recorded quantization parameters.
 
 These measurements are diagnostic observations, not operational decisions.
+
+Paired numerical comparison uses the floating-point tensor after the applicable
+`DequantizeLinear` at an INT8 boundary and its lineage-matched FP32 tensor. Raw
+integer tensors are retained separately only for the saturation audit. A probe
+without a unique same-semantics floating-point pair is `BLOCKED`.
+
+Metric semantics are frozen as follows:
+
+- corresponding tensors must have identical logical shape after structural
+  lineage alignment; otherwise the diagnostic is `BLOCKED`;
+- the batch axis is axis `0` and each query is an independent observation;
+- for tensors that preserve a sequence axis, positions whose frozen
+  `attention_mask` is `0` are excluded from every metric; inability to establish
+  the sequence axis structurally is `BLOCKED`;
+- maximum absolute delta is the maximum over all valid elements per query;
+- mean absolute delta is the arithmetic mean over all valid elements per query;
+- relative L2 error is `||target - source||_2 / ||source||_2` over all valid
+  elements per query; it is `0` when both norms are zero and is recorded as
+  `UNBOUNDED_ZERO_REFERENCE` with JSON value `null` when only the source norm is
+  zero;
+- cosine similarity is computed along the last feature axis for every valid
+  token or row, then reported as per-query minimum and arithmetic mean; a pair
+  of zero vectors has cosine `1`, exactly one zero vector has cosine `0`, and an
+  absent or ambiguous feature axis is `BLOCKED`;
+- every per-query value is retained in canonical query-ID order; package-level
+  maxima, minima, and arithmetic means are derived from those values and never
+  replace them;
+- any unexpected NaN or infinity is `BLOCKED`; JSON artifacts contain no
+  non-standard numeric literals.
+
+For deterministic localization, each probe also records the bounded per-query
+score
+`symmetric_l2 = ||target - source||_2 / max(||source||_2, ||target||_2)`.
+It is `0` when both norms are zero. The probe score is the arithmetic mean of
+its per-query scores. This is a diagnostic ordering statistic, not a detection
+limit or operational tolerance.
+
+For a quantized activation tensor, saturation means an observed integer equals
+the minimum or maximum value representable by its recorded dtype. Counts and
+fractions are reported per query and in aggregate. If the integer tensor or its
+quantization parameters are not observable, saturation is explicitly
+`NOT_MEASURABLE`; it is never silently omitted.
 
 ### 6.6 Instrumentation fidelity control
 
@@ -176,6 +249,30 @@ Allowed outcomes per hypothesis are `SUPPORTED`, `NOT_SUPPORTED`, and
 `UNRESOLVED`. These are diagnostic labels, not scientific transition decisions.
 Multiple hypotheses may remain supported or unresolved.
 
+Hypothesis labels use this deterministic procedure:
+
+1. Order matched probes by their frozen lineage order from graph input to final
+   output. Set the predecessor score of the first probe to `0`.
+2. For each probe, compute `growth = max(0, score - predecessor_score)`.
+3. The dominant-onset set contains every probe whose growth equals the maximum
+   observed growth. If the maximum is `0`, every hypothesis is `UNRESOLVED`.
+4. For `H1`, `H2`, and `H4`, the relevant families are respectively
+   `NORMALIZATION`, `ATTENTION_OR_MATMUL`, and `OUTPUT_PATH`. A hypothesis is
+   `SUPPORTED` when every member of the dominant-onset set has its relevant
+   family label, `NOT_SUPPORTED` when none does, and `UNRESOLVED` when the set
+   mixes relevant and non-relevant boundaries.
+5. `H3` is `NOT_SUPPORTED` when saturation is measurable at every planned
+   quantized-activation boundary and all saturation counts are zero. It is
+   `SUPPORTED` when saturation is measurable at every such boundary, at least
+   one dominant-onset boundary has non-zero saturation, and the maximum observed
+   saturation fraction occurs at a dominant-onset boundary. It is otherwise
+   `UNRESOLVED`.
+
+Equality comparisons use the replayed IEEE-754 values produced by the frozen
+metric formulas; no epsilon or post-observation threshold may be introduced.
+`SUPPORTED` means structurally consistent with the hypothesis under this
+procedure, not proven causal.
+
 ## 8. Diagnostic package
 
 The qualifying package must contain:
@@ -187,7 +284,8 @@ The qualifying package must contain:
 - `quantization-parameter-report.json`;
 - `probe-plan.json`;
 - `instrumentation-fidelity.json`;
-- canonical probe observations in a non-pickle format;
+- `probe-observations.npz`, containing numeric or fixed-width Unicode arrays
+  loadable with NumPy `allow_pickle=False`;
 - `activation-divergence-report.json`;
 - `hypothesis-report.json`;
 - `replay-bundle.json`;
