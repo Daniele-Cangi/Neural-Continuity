@@ -1,58 +1,94 @@
-# neural-continuity
+# Neural Continuity
 
-`neural-continuity` is a small, explicit measurement repository for controlled
-model-continuity milestones.
+**Evidence-driven framework for testing whether model transformations preserve declared operational behavior.**
 
-## Thesis
-
-Neural continuity asks whether a model transition preserves declared operational properties
-inside an explicit measurement envelope and measured noise model.  
-It is **not** a claim of universal neural equivalence.
-
-Outcomes are constrained to:
+Neural Continuity measures whether a model transition preserves a frozen set of operational properties inside an explicit measurement envelope and measured noise model. Each experiment produces replayable evidence and one of three decisions:
 
 - `PASS`
 - `FAIL`
 - `INCONCLUSIVE`
 
-## Current status
+> **A model can execute correctly and still fail continuity.**
 
-- M0 measurement integrity is complete and replay-verified.
-- M1 Transition A (`PyTorch FP32 → ONNX FP32`) passed under its frozen contract.
-- M1 Transition B evaluated one frozen static-QDQ ONNX INT8 candidate. The technical
-  pipeline and model-free replay passed, but the scientific result is `FAIL` because
-  functional limits were exceeded. This is evidence for that candidate and protocol,
-  not a universal claim about INT8 quantization.
+That distinction is central to the project. Successful export, conversion, quantization, or runtime execution is not treated as proof that the transformed model still behaves within the declared contract.
 
-The failed candidate is not to be regenerated, retuned, or re-evaluated by changing
-thresholds within the same evidence slice. A further candidate requires a separately
-versioned contract and experiment.
+## What Neural Continuity measures
 
-M1 closure records:
+The framework separates model execution from evidence about preserved behavior.
 
+Current measurement and evidence machinery covers:
+
+- frozen functional requirements and regression limits;
+- embedding and representation drift;
+- retrieval and ranking preservation;
+- measured noise envelopes and repeatability;
+- source / candidate identity and compatibility checks;
+- deterministic evidence packaging with SHA-256 manifests;
+- model-free replay of recorded decisions.
+
+Experiments are evaluated against predeclared contracts. A candidate does not get to redefine its own baseline, tolerances, or acceptance criteria after the result is known.
+
+## Current evidence
+
+| Milestone | Transition / purpose | Result |
+|---|---|---|
+| **M0** | Measurement integrity | **PASS / replay-verified** |
+| **M1-A** | `PyTorch FP32 → ONNX FP32` | **PASS** under the frozen contract |
+| **M1-B** | `ONNX FP32 → static-QDQ ONNX INT8` | **FAIL** under the frozen contract |
+
+### M0 — measurement integrity
+
+M0 establishes the trust boundary for the measurement system. It verifies that the framework can distinguish:
+
+1. normal variation from repeated observation of the same frozen model;
+2. deliberate material degradation;
+3. a boundary condition where the evidence remains `INCONCLUSIVE`.
+
+Replay reconstructs the recorded aggregate decision and individual control outcomes without rerunning the original model execution.
+
+### M1-A — FP32 export continuity
+
+Transition A evaluates `PyTorch FP32 → ONNX FP32` separately from quantization so export/runtime effects are not conflated with quantization effects.
+
+The transition passed under its frozen contract.
+
+See [M1 Transition A evidence](docs/M1_TRANSITION_A_EVIDENCE.md).
+
+### M1-B — INT8 candidate failure
+
+Transition B evaluated one frozen static-QDQ ONNX INT8 candidate against the replay-verified ONNX FP32 source.
+
+The technical pipeline completed successfully, measurement integrity remained valid, and model-free replay reproduced the recorded decision. The scientific result was nevertheless **`FAIL`** because the candidate exceeded the inherited functional limits across all required batch sizes (`1`, `16`, `64`) and materially degraded decision-bearing retrieval metrics.
+
+This is exactly the separation Neural Continuity is intended to enforce:
+
+```text
+technical execution     PASS
+measurement integrity   VALID
+model-free replay       PASS
+continuity decision     FAIL
+```
+
+The failed candidate remains frozen. It is not regenerated, retuned, or re-evaluated by changing thresholds inside the same evidence slice. A new attempt requires a separately versioned contract, candidate identity, and experiment.
+
+See:
+
+- [M1 Transition B decision](docs/M1_TRANSITION_B_DECISION.md)
+- [M1 Transition B postmortem](docs/M1_TRANSITION_B_POSTMORTEM.md)
 - [M1 v1 evidence archive](docs/M1_EVIDENCE_ARCHIVE.md)
-- [Transition B v1 postmortem](docs/M1_TRANSITION_B_POSTMORTEM.md)
-
-## M0-specific scope
-
-M0 only implements `M0_MEASUREMENT_INTEGRITY`.
-It proves the measurement system can distinguish:
-
-1. normal variation from repeated observation of the same frozen model,
-2. deliberate material degradation,
-3. an explicit boundary condition that remains inconclusive.
 
 ## Why this is continuity
 
-The framework compares declared experiments and evidence against noise envelopes.
-It does not claim global equivalence, guaranteed safety, or certification.
-It reports where evidence is insufficient and never conflates operational agreement with
-universal invariance.
+Model transformations can preserve executability while changing behavior that matters to the application. Neural Continuity asks a narrower and testable question:
+
+> **Did this declared transition preserve the operational properties we froze before evaluation, inside the evidence envelope we actually measured?**
+
+The framework therefore compares declared experiments and evidence against measured envelopes rather than treating conversion success, numerical closeness, or a single benchmark score as automatic equivalence.
 
 ## Meaning of decisions
 
 - `PASS`: observed material metrics stay within the measured noise envelope and no frozen-set functional regression occurred.
-- `FAIL`: at least one non-negotiable frozen-set regression occurred, or material metric delta exceeds envelope.
+- `FAIL`: at least one non-negotiable frozen-set regression occurred, or a material metric delta exceeds the declared envelope.
 - `INCONCLUSIVE`: evidence is ambiguous, boundary-overlapping, insufficient, or missing.
 
 ## Quick start
@@ -78,16 +114,25 @@ python -m neural_continuity.cli m0-run --config experiments/m0-real-teacher.yaml
 
 Real teacher execution may be skipped automatically when the model is not available offline.
 
-## Reproducibility
+## Reproducibility and evidence
 
-- Deterministic local toy model and fixture for offline tests.
-- Canonical JSON serialization with sorted keys and UTF-8.
-- Artifact SHA-256 manifests.
-- Stable fixture SHA-256 identity.
+Neural Continuity treats the evidence package as part of the experiment rather than an afterthought.
+
+The repository includes:
+
+- deterministic local toy models and fixtures for offline tests;
+- canonical JSON serialization with sorted keys and UTF-8;
+- stable fixture identities;
+- SHA-256 artifact manifests;
+- frozen experiment contracts;
+- compatibility checks between source and candidate observations;
+- replay paths that reproduce decisions from recorded evidence without rerunning the models.
+
+M1 v1 also records a tamper-evident inventory for its authoritative evidence packages. Tamper-evident does not mean physically immutable, and remote redundancy is not currently claimed as verified.
 
 ## Repository outputs
 
-Each run creates `runs/<run-id>/` containing:
+A measurement run can produce `runs/<run-id>/` artifacts including:
 
 - `model-manifest.json`
 - `dataset-manifest.json`
@@ -100,12 +145,16 @@ Each run creates `runs/<run-id>/` containing:
 - `decision.json`
 - `artifact-manifest.json`
 
-## Non-claims (M0)
+## Claim boundary
 
-The project does not claim:
+Neural Continuity measures continuity only inside declared experiments, frozen contracts, observed datasets, and measured uncertainty.
 
-- universal equivalence,
-- certification,
-- guaranteed safety,
-- production-readiness,
-- complete OOD behavior coverage.
+It does **not** claim:
+
+- universal neural equivalence;
+- certification or guaranteed safety;
+- complete out-of-distribution behavior coverage;
+- that one failed INT8 candidate proves general INT8 incompatibility;
+- production readiness for every model transformation class.
+
+The project reports where evidence supports continuity, where it falsifies it, and where the available evidence is not strong enough to decide.
