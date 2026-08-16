@@ -144,7 +144,10 @@ tensor lineage under these frozen rules:
   `MultiHeadAttention`, `MatMul`, `MatMulInteger`, `QLinearMatMul`, or `Gemm`;
 - `OUTPUT_PATH`: the boundary is at or downstream of the first `ReduceMean`,
   `ReduceSum`, `ReduceMax`, `GlobalAveragePool`, or `GlobalMaxPool` that is an
-  ancestor of the final embedding output;
+  ancestor of the final embedding output; it also includes the nearest upstream
+  `NORMALIZATION` boundary on each incoming lineage path when no
+  `ATTENTION_OR_MATMUL` boundary lies between that normalization and the first
+  output-path reduction;
 - `FINAL_OUTPUT`: the boundary is the declared final embedding output.
 
 A structural normalization subgraph must be recognized from operator and edge
@@ -193,15 +196,42 @@ Metric semantics are frozen as follows:
   elements per query; it is `0` when both norms are zero and is recorded as
   `UNBOUNDED_ZERO_REFERENCE` with JSON value `null` when only the source norm is
   zero;
-- cosine similarity is computed along the last feature axis for every valid
-  token or row, then reported as per-query minimum and arithmetic mean; a pair
-  of zero vectors has cosine `1`, exactly one zero vector has cosine `0`, and an
-  absent or ambiguous feature axis is `BLOCKED`;
+- cosine similarity is computed along the last feature axis for tensors with a
+  structurally identified feature axis, then reported as per-query minimum and
+  arithmetic mean; attention-score tensors shaped as
+  `[batch, heads, query, key]` exclude cells where either the query or key mask
+  is `0`, flatten all remaining non-batch values per query, and report one
+  cosine per query; any other tensor without a feature axis uses the same
+  flattened non-batch rule after its valid-element mask is established; a pair
+  of zero vectors has cosine `1` and exactly one zero vector has cosine `0`;
+  only an ambiguous valid-element mask or batch axis is `BLOCKED`;
 - every per-query value is retained in canonical query-ID order; package-level
   maxima, minima, and arithmetic means are derived from those values and never
   replace them;
 - any unexpected NaN or infinity is `BLOCKED`; JSON artifacts contain no
   non-standard numeric literals.
+
+Canonical arithmetic is frozen as follows:
+
+- source and target values are converted element-by-element to little-endian
+  IEEE-754 binary64 before arithmetic;
+- valid elements are traversed in canonical query-ID order and C-contiguous
+  tensor-index order;
+- subtraction, multiplication, division, and each addition round to binary64
+  using round-to-nearest, ties-to-even;
+- every sum uses a fixed pairwise tree: adjacent values are added left-to-right,
+  an odd final value is carried unchanged, and levels repeat until one value
+  remains;
+- means divide the canonical pairwise sum by the exact integer count converted
+  to binary64;
+- L2 norms apply correctly rounded binary64 square root to the canonical
+  pairwise sum of squares;
+- reported scalar values are serialized as lowercase hexadecimal binary64
+  strings equivalent to Python `float.hex()`; hypothesis equality compares the
+  decoded 64-bit patterns, not decimal renderings;
+- the package records the canonical metric implementation SHA-256 and runtime
+  versions; replay requires both the declared algorithm version and
+  implementation hash.
 
 For deterministic localization, each probe also records the bounded per-query
 score
@@ -212,9 +242,13 @@ limit or operational tolerance.
 
 For a quantized activation tensor, saturation means an observed integer equals
 the minimum or maximum value representable by its recorded dtype. Counts and
-fractions are reported per query and in aggregate. If the integer tensor or its
-quantization parameters are not observable, saturation is explicitly
-`NOT_MEASURABLE`; it is never silently omitted.
+fractions are reported per query and in aggregate. The canonical aggregate
+fraction used by `H3` is the total saturated valid integer-element count across
+all authorized queries divided by the total observed valid integer-element
+count at that boundary; every element contributes once and padded elements do
+not contribute to either count. Per-query fractions are never used for `H3`.
+If the integer tensor or its quantization parameters are not observable,
+saturation is explicitly `NOT_MEASURABLE`; it is never silently omitted.
 
 ### 6.6 Instrumentation fidelity control
 
@@ -251,25 +285,35 @@ Multiple hypotheses may remain supported or unresolved.
 
 Hypothesis labels use this deterministic procedure:
 
-1. Order matched probes by their frozen lineage order from graph input to final
-   output. Set the predecessor score of the first probe to `0`.
-2. For each probe, compute `growth = max(0, score - predecessor_score)`.
-3. The dominant-onset set contains every probe whose growth equals the maximum
-   observed growth. If the maximum is `0`, every hypothesis is `UNRESOLVED`.
-4. For `H1`, `H2`, and `H4`, the relevant families are respectively
+1. For each probe, derive its structural predecessor set. A predecessor is the
+   nearest upstream matched probe on one incoming tensor-lineage path, with no
+   other matched probe between them. Each path without an upstream probe uses a
+   synthetic graph-input predecessor with score `0`.
+2. Create one directed probe edge for every structural predecessor relationship.
+   Parallel attention and residual branches remain separate; topological list
+   adjacency never creates an edge.
+3. For each edge, compute
+   `growth = max(0, child_score - predecessor_score)`.
+4. The dominant-onset edge set contains every edge whose growth has the maximum
+   canonical binary64 bit pattern under numeric comparison. The
+   dominant-onset boundary set is the set of child probes on those edges. If the
+   maximum growth is positive zero, every hypothesis is `UNRESOLVED`.
+5. For `H1`, `H2`, and `H4`, the relevant families are respectively
    `NORMALIZATION`, `ATTENTION_OR_MATMUL`, and `OUTPUT_PATH`. A hypothesis is
-   `SUPPORTED` when every member of the dominant-onset set has its relevant
-   family label, `NOT_SUPPORTED` when none does, and `UNRESOLVED` when the set
-   mixes relevant and non-relevant boundaries.
-5. `H3` is `NOT_SUPPORTED` when saturation is measurable at every planned
-   quantized-activation boundary and all saturation counts are zero. It is
-   `SUPPORTED` when saturation is measurable at every such boundary, at least
-   one dominant-onset boundary has non-zero saturation, and the maximum observed
-   saturation fraction occurs at a dominant-onset boundary. It is otherwise
-   `UNRESOLVED`.
+   `SUPPORTED` when every member of the dominant-onset boundary set has its
+   relevant family label, `NOT_SUPPORTED` when none does, and `UNRESOLVED` when
+   the set mixes relevant and non-relevant boundaries.
+6. `H3` is `NOT_SUPPORTED` when saturation is measurable at every planned
+   quantized-activation boundary and all canonical aggregate saturation counts
+   are zero. Otherwise, form the maximum-saturation boundary set from every
+   boundary tied for the greatest canonical aggregate saturation fraction. `H3`
+   is `SUPPORTED` only when saturation is measurable everywhere, that greatest
+   fraction is non-zero, and the maximum-saturation set intersects the
+   dominant-onset boundary set. It is otherwise `UNRESOLVED`.
 
-Equality comparisons use the replayed IEEE-754 values produced by the frozen
-metric formulas; no epsilon or post-observation threshold may be introduced.
+Equality comparisons use the canonical replayed IEEE-754 bit patterns produced
+by the frozen metric formulas; no epsilon or post-observation threshold may be
+introduced.
 `SUPPORTED` means structurally consistent with the hypothesis under this
 procedure, not proven causal.
 
