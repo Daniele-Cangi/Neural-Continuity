@@ -137,6 +137,24 @@ See:
 - [M1 Transition B postmortem](docs/M1_TRANSITION_B_POSTMORTEM.md)
 - [M1 v1 evidence archive](docs/M1_EVIDENCE_ARCHIVE.md)
 
+## Current research frontier
+
+The current frontier is a **read-only diagnosis of the closed M1-B v1 INT8 candidate**. The governing document is the [M1 Transition B v2 diagnostic protocol](docs/M1_TRANSITION_B_V2_DIAGNOSTIC_PROTOCOL.md).
+
+The diagnostic asks where the frozen INT8 candidate first develops material numerical divergence relative to the verified ONNX FP32 source. It may localize and characterize divergence; it does not authorize a new candidate, new calibration, new tolerances, or a replacement Transition B decision.
+
+Contributions are welcome around authority verification, deterministic graph inventory, structural lineage, quantization-parameter inspection, probe planning, instrumentation fidelity, diagnostic evidence packaging, and model-free replay. Historical M0/M1-v1 evidence remains frozen and auditable.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) before changing experiment, diagnostic, evidence, or verification behavior.
+
+## Why this is continuity
+
+Model transformations can preserve executability while changing behavior that matters to the application. Neural Continuity asks a narrower and testable question:
+
+> **Did this declared transition preserve the operational properties we froze before evaluation, inside the evidence envelope we actually measured?**
+
+The framework therefore compares declared experiments and evidence against measured envelopes rather than treating conversion success, numerical closeness, or a single benchmark score as automatic equivalence.
+
 ## Meaning of decisions
 
 Scientific decisions:

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "neural-continuity"
 version = "0.1.0"
-description = "M0 measurement integrity for model continuity experiments."
+description = "Evidence-driven framework for testing whether model transformations preserve declared operational behavior."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
@@ -41,7 +41,8 @@ neural-continuity-m1-pure-comparison = "neural_continuity.m1_b.pure_comparison:m
 neural-continuity-m1-transition-b-decision = "neural_continuity.m1_b.decision_package:main"
 
 [project.urls]
-Homepage = "https://example.com/neural-continuity"
+Repository = "https://github.com/Daniele-Cangi/Neural-Continuity"
+Issues = "https://github.com/Daniele-Cangi/Neural-Continuity/issues"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
