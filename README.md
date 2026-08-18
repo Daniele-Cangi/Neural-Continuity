@@ -1,16 +1,48 @@
 # Neural Continuity
 
-**Evidence-driven framework for testing whether model transformations preserve declared operational behavior.**
+<p align="center">
+  <img src="docs/assets/neural-continuity-overview.png" alt="Neural Continuity evidence pipeline connecting source and transformed neural models" width="100%">
+</p>
 
-Neural Continuity measures whether a model transition preserves a frozen set of operational properties inside an explicit measurement envelope and measured noise model. Each experiment produces replayable evidence and one of three decisions:
+<p align="center">
+  <img src="https://img.shields.io/badge/license-MIT-C9944B?style=flat-square" alt="MIT License">
+  <img src="https://img.shields.io/badge/M0-replay--verified-2F855A?style=flat-square" alt="M0 replay verified">
+  <img src="https://img.shields.io/badge/M1--A-PASS-2F855A?style=flat-square" alt="M1 Transition A passed">
+  <img src="https://img.shields.io/badge/M1--B-FAIL-C2413B?style=flat-square" alt="M1 Transition B failed its frozen contract">
+  <img src="https://img.shields.io/badge/evidence-tamper--evident-167D8D?style=flat-square" alt="Tamper-evident evidence">
+</p>
+
+<p align="center">
+  <a href="#why-this-project-exists">Why</a> ·
+  <a href="#how-it-works">Workflow</a> ·
+  <a href="#current-evidence">Evidence</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#documentation-map">Documentation</a>
+</p>
+
+**Evidence-driven research framework for testing whether model transformations preserve declared operational behavior.**
+
+Neural Continuity evaluates a declared transition between a source model and a candidate. It freezes the contract before evaluation, measures both sides under compatible conditions, packages tamper-evident evidence, and supports replay without rerunning the models.
+
+Qualifying evidence produces one of three scientific decisions:
 
 - `PASS`
 - `FAIL`
 - `INCONCLUSIVE`
 
+Missing prerequisites and execution failures are kept separate as `BLOCKED` and `EXECUTION_ERROR`.
+
 > **A model can execute correctly and still fail continuity.**
 
 That distinction is central to the project. Successful export, conversion, quantization, or runtime execution is not treated as proof that the transformed model still behaves within the declared contract.
+
+## Why this project exists
+
+Model transformations can preserve executability while changing representations, rankings, or application-level behavior. Neural Continuity asks a deliberately narrow question:
+
+> **Did this declared transition preserve the operational properties frozen before evaluation, inside the evidence envelope actually measured?**
+
+It does not certify universal model equivalence, infer behavior outside the observed experiment, or allow a candidate to redefine tolerances after its results are known.
 
 ## What Neural Continuity measures
 
@@ -27,6 +59,34 @@ Current measurement and evidence machinery covers:
 - model-free replay of recorded decisions.
 
 Experiments are evaluated against predeclared contracts. A candidate does not get to redefine its own baseline, tolerances, or acceptance criteria after the result is known.
+
+## How it works
+
+```mermaid
+flowchart LR
+    S[Source model] --> SO[Canonical source observations]
+    S --> T[Declared transformation]
+    T --> C[Candidate model]
+    C --> CO[Canonical candidate observations]
+    SO --> G{Fail-closed compatibility gate}
+    CO --> G
+    K[Frozen contract] --> D[Evidence-bounded decision]
+    G --> D
+    D --> E[Tamper-evident evidence package]
+    E --> R[Model-free replay]
+    D --> P[PASS]
+    D --> F[FAIL]
+    D --> I[INCONCLUSIVE]
+```
+
+The compatibility gate checks identities and semantics before comparison. Declared missing artifacts, incompatible observation packages, or integrity failures do not get silently repaired.
+
+| Layer | Question | Outcomes |
+|---|---|---|
+| Technical execution | Did the pipeline run as declared? | valid execution or `EXECUTION_ERROR` |
+| Evidence integrity | Are prerequisites complete, compatible, and hash-verified? | valid evidence or `BLOCKED` |
+| Scientific decision | Did behavior remain inside the frozen operational boundary? | `PASS`, `FAIL`, `INCONCLUSIVE` |
+| Replay | Can the result be reconstructed from recorded evidence? | match or fail-closed mismatch |
 
 ## Current evidence
 
@@ -97,9 +157,16 @@ The framework therefore compares declared experiments and evidence against measu
 
 ## Meaning of decisions
 
-- `PASS`: observed material metrics stay within the measured noise envelope and no frozen-set functional regression occurred.
-- `FAIL`: at least one non-negotiable frozen-set regression occurred, or a material metric delta exceeds the declared envelope.
-- `INCONCLUSIVE`: evidence is ambiguous, boundary-overlapping, insufficient, or missing.
+Scientific decisions:
+
+- `PASS`: complete, valid evidence satisfies every applicable frozen operational tolerance.
+- `FAIL`: complete, valid evidence demonstrates at least one applicable frozen operational-tolerance violation.
+- `INCONCLUSIVE`: complete evidence intersects a decision boundary or does not justify either `PASS` or `FAIL`.
+
+Technical outcomes:
+
+- `BLOCKED`: a declared prerequisite, artifact, observation, compatibility condition, or integrity check is missing or invalid.
+- `EXECUTION_ERROR`: export, runtime, provider, preprocessing, or another technical operation fails; this is not recorded as a scientific regression.
 
 ## Quick start
 
@@ -108,11 +175,12 @@ The framework therefore compares declared experiments and evidence against measu
 ```bash
 python -m venv .venv
 . .venv/Scripts/Activate.ps1  # Windows PowerShell
-pip install -e .
-pytest -q
+pip install -e ".[dev,test]"
+python -m pytest -q
 ruff check .
-black --check .
-mypy src
+python -m black --check --workers 1 -- src tests
+python -m mypy src
+python -m compileall -q src tests
 python -m neural_continuity.cli m0-run --config experiments/m0-smoke.yaml
 ```
 
@@ -140,6 +208,27 @@ The repository includes:
 
 M1 v1 also records a tamper-evident inventory for its authoritative evidence packages. Tamper-evident does not mean physically immutable, and remote redundancy is not currently claimed as verified.
 
+## Repository map
+
+| Path | Responsibility |
+|---|---|
+| `src/neural_continuity/` | Measurement, evidence, decision, replay, and transition-specific implementation |
+| `contracts/` | Single authority for frozen transition contracts |
+| `experiments/` | Declared experiment configurations and smoke fixtures |
+| `tests/` | Offline, fail-closed, replay, and integrity verification |
+| `docs/` | Research plans, evidence reports, postmortems, and diagnostic protocols |
+| `runs/` | Generated local run packages; not a substitute for authoritative archived evidence |
+
+## Documentation map
+
+- [M1 research guide](M1_RESEARCH_GUIDE.md)
+- [M1 action plan](docs/M1_ACTION_PLAN.md)
+- [Transition A evidence](docs/M1_TRANSITION_A_EVIDENCE.md)
+- [Transition B decision](docs/M1_TRANSITION_B_DECISION.md)
+- [Transition B postmortem](docs/M1_TRANSITION_B_POSTMORTEM.md)
+- [M1 v1 evidence archive](docs/M1_EVIDENCE_ARCHIVE.md)
+- [Transition B v2 diagnostic protocol](docs/M1_TRANSITION_B_V2_DIAGNOSTIC_PROTOCOL.md)
+
 ## Repository outputs
 
 A measurement run can produce `runs/<run-id>/` artifacts including:
@@ -158,4 +247,10 @@ A measurement run can produce `runs/<run-id>/` artifacts including:
 ## Claim boundary
 
 Neural Continuity measures continuity only inside declared experiments, frozen contracts, observed datasets, and measured uncertainty.
+
+It produces evidence-bounded continuity decisions. It does **not** certify universal equivalence, physical immutability of evidence, or correctness outside the declared experimental boundary.
+
+## Repository topics
+
+`machine-learning` · `model-evaluation` · `model-quantization` · `onnx` · `reproducible-research` · `mlops` · `retrieval` · `evidence-integrity` · `scientific-computing`
 
