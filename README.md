@@ -175,7 +175,7 @@ Technical outcomes:
 ```bash
 python -m venv .venv
 . .venv/Scripts/Activate.ps1  # Windows PowerShell
-pip install -e .
+pip install -e ".[dev,test]"
 python -m pytest -q
 ruff check .
 python -m black --check --workers 1 -- src tests
