@@ -39,6 +39,7 @@ neural-continuity-m1-fp32-observation = "neural_continuity.m1_b.onnx_fp32_observ
 neural-continuity-m1-observation-compatibility = "neural_continuity.m1_b.paired_observation_compatibility:main"
 neural-continuity-m1-pure-comparison = "neural_continuity.m1_b.pure_comparison:main"
 neural-continuity-m1-transition-b-decision = "neural_continuity.m1_b.decision_package:main"
+neural-continuity-m1-diagnostic-preflight = "neural_continuity.m1_diagnostics.preflight:main"
 
 [project.urls]
 Repository = "https://github.com/Daniele-Cangi/Neural-Continuity"
