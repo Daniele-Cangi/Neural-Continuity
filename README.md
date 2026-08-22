@@ -11,6 +11,7 @@
   <img src="https://img.shields.io/badge/M1--B-FAIL-C2413B?style=flat-square" alt="M1 Transition B failed its frozen contract">
   <img src="https://img.shields.io/badge/evidence-tamper--evident-167D8D?style=flat-square" alt="Tamper-evident evidence">
   <img src="https://img.shields.io/badge/diagnostics-model--free-C36B2B?style=flat-square" alt="Model-free diagnostics">
+  <img src="https://img.shields.io/badge/causal%20plan-pre--registered-2F6F5E?style=flat-square" alt="Causal plan pre-registered">
 </p>
 
 <p align="center">
@@ -141,10 +142,9 @@ See:
 
 ## Current research frontier
 
-Transition B remains scientifically frozen as <code>FAIL</code>. A verified paired activation package and its model-free replay now provide probe-level localization without rerunning either model or reading activations during this structural slice.
+Transition B remains scientifically frozen as <code>FAIL</code>. Structural localization is complete; the current slice pre-registers controls, single-family precision holdouts, and pairwise follow-ups before any diagnostic candidate can be created.
 
-The current step groups consecutive drift into deterministic structural clusters. Boundaries use only probe order, decision class, tensor basis, and declared structural families; no numerical threshold or candidate-specific exception is introduced.
-
+Every cluster remains in scope. Detection limits must come from verified measurement authority, operational tolerances remain frozen, and no intervention is authorized by the planning package.
 ## Diagnostic snapshot
 
 | Signal | Verified snapshot |
@@ -153,6 +153,8 @@ The current step groups consecutive drift into deterministic structural clusters
 | Probe outcomes | 52 bitwise equal; 219 finite drift; 12 non-finite |
 | First divergence | <code>probe-0001</code> |
 | Highest finite-cluster peak | <code>probe-0181</code> - attention/matmul + normalization + output aggregation + quantized compute |
+| Structural localization | 64 clusters: 58 finite and 6 non-finite |
+| Causal status | Hypotheses pre-registered; interventions not authorized |
 
 ~~~mermaid
 flowchart LR
