@@ -49,6 +49,7 @@ neural-continuity-m1-diagnostic-causal-plan = "neural_continuity.m1_diagnostics.
 neural-continuity-m1-diagnostic-stage0 = "neural_continuity.m1_diagnostics.stage0_cli:main"
 neural-continuity-m1-runtime-provenance = "neural_continuity.m1_diagnostics.runtime_provenance_cli:main"
 neural-continuity-m1-null-extension-plan = "neural_continuity.m1_diagnostics.measurement_null_extension_cli:main"
+neural-continuity-m1-null-sentinel = "neural_continuity.m1_diagnostics.measurement_null_sentinel_cli:main"
 
 [project.urls]
 Repository = "https://github.com/Daniele-Cangi/Neural-Continuity"

@@ -280,6 +280,7 @@ It produces evidence-bounded continuity decisions. It does **not** certify unive
 | INT8 canonical repeat | `BLOCKED` | Embedding and ranking drift exceed the frozen repeated-inference envelope. |
 | Runtime provenance | `INCONCLUSIVE` | The frozen batch-size envelope does not cover canonical baseline variation. |
 | Measurement-null extension | `PREREGISTERED` | 120 process epochs and 960 source-only passes are frozen; execution has not started. |
+| Sentinel executor | `IMPLEMENTED, NOT EXECUTED` | Authority-first, one epoch per process, hash-chained resume; full-corpus execution remains unavailable. |
 | Stage 1 | `NOT STARTED` | The fail-closed gate holds; Transition B remains `FAIL`. |
 
 Stage 0, runtime-provenance, and measurement-null-plan replay are model-free and verified. No threshold or frozen evidence was changed.
