@@ -271,3 +271,14 @@ It produces evidence-bounded continuity decisions. It does **not** certify unive
 
 `machine-learning` · `model-evaluation` · `model-quantization` · `onnx` · `reproducible-research` · `mlops` · `retrieval` · `evidence-integrity` · `scientific-computing`
 
+## Current diagnostic gate
+
+<!-- m1-stage0-status -->
+| Control | Outcome | Evidence |
+|---|---|---|
+| FP32 canonical repeat | `BLOCKED` | Rankings are stable; numerical drift exceeds the frozen repeated-inference envelope. |
+| INT8 canonical repeat | `BLOCKED` | Embedding and ranking drift exceed the frozen repeated-inference envelope. |
+| Stage 1 | `NOT STARTED` | The fail-closed gate holds; Transition B remains `FAIL`. |
+
+Replay is model-free and verified. No threshold or frozen evidence was changed.
+<!-- /m1-stage0-status -->
