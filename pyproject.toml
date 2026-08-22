@@ -43,6 +43,7 @@ neural-continuity-m1-diagnostic-preflight = "neural_continuity.m1_diagnostics.pr
 neural-continuity-m1-diagnostic-instrumentation = "neural_continuity.m1_diagnostics.instrumentation_preflight:main"
 neural-continuity-m1-diagnostic-fidelity = "neural_continuity.m1_diagnostics.fidelity_cli:main"
 neural-continuity-m1-diagnostic-activation = "neural_continuity.m1_diagnostics.activation_cli:main"
+neural-continuity-m1-diagnostic-analysis = "neural_continuity.m1_diagnostics.activation_analysis_cli:main"
 
 [project.urls]
 Repository = "https://github.com/Daniele-Cangi/Neural-Continuity"
