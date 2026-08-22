@@ -10,12 +10,14 @@
   <img src="https://img.shields.io/badge/M1--A-PASS-2F855A?style=flat-square" alt="M1 Transition A passed">
   <img src="https://img.shields.io/badge/M1--B-FAIL-C2413B?style=flat-square" alt="M1 Transition B failed its frozen contract">
   <img src="https://img.shields.io/badge/evidence-tamper--evident-167D8D?style=flat-square" alt="Tamper-evident evidence">
+  <img src="https://img.shields.io/badge/diagnostics-model--free-C36B2B?style=flat-square" alt="Model-free diagnostics">
 </p>
 
 <p align="center">
   <a href="#why-this-project-exists">Why</a> ·
   <a href="#how-it-works">Workflow</a> ·
   <a href="#current-evidence">Evidence</a> ·
+  <a href="#diagnostic-snapshot">Diagnostics</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#documentation-map">Documentation</a>
 </p>
@@ -139,14 +141,27 @@ See:
 
 ## Current research frontier
 
-The current frontier is a **read-only diagnosis of the closed M1-B v1 INT8 candidate**. The governing document is the [M1 Transition B v2 diagnostic protocol](docs/M1_TRANSITION_B_V2_DIAGNOSTIC_PROTOCOL.md).
+Transition B remains scientifically frozen as <code>FAIL</code>. A verified paired activation package and its model-free replay now provide probe-level localization without rerunning either model or reading activations during this structural slice.
 
-The diagnostic asks where the frozen INT8 candidate first develops material numerical divergence relative to the verified ONNX FP32 source. It may localize and characterize divergence; it does not authorize a new candidate, new calibration, new tolerances, or a replacement Transition B decision.
+The current step groups consecutive drift into deterministic structural clusters. Boundaries use only probe order, decision class, tensor basis, and declared structural families; no numerical threshold or candidate-specific exception is introduced.
 
-Contributions are welcome around authority verification, deterministic graph inventory, structural lineage, quantization-parameter inspection, probe planning, instrumentation fidelity, diagnostic evidence packaging, and model-free replay. Historical M0/M1-v1 evidence remains frozen and auditable.
+## Diagnostic snapshot
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) before changing experiment, diagnostic, evidence, or verification behavior.
+| Signal | Verified snapshot |
+|---|---|
+| Paired probes | 283 floating probes; 248 with integer-domain proxies |
+| Probe outcomes | 52 bitwise equal; 219 finite drift; 12 non-finite |
+| First divergence | <code>probe-0001</code> |
+| Highest finite-cluster peak | <code>probe-0181</code> - attention/matmul + normalization + output aggregation + quantized compute |
 
+~~~mermaid
+flowchart LR
+    A[Verified activation package] --> B[Model-free probe analysis]
+    B --> C[Deterministic structural clusters]
+    C --> D[Tamper-evident report and replay]
+~~~
+
+The observed Pearson association between relative L2 error and the integer dtype-extreme proxy is <code>-0.3205</code>. It is descriptive, non-causal, and does not support a saturation-only explanation.
 ## Why this is continuity
 
 Model transformations can preserve executability while changing behavior that matters to the application. Neural Continuity asks a narrower and testable question:
