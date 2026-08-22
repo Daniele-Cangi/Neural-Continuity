@@ -278,7 +278,8 @@ It produces evidence-bounded continuity decisions. It does **not** certify unive
 |---|---|---|
 | FP32 canonical repeat | `BLOCKED` | Rankings are stable; numerical drift exceeds the frozen repeated-inference envelope. |
 | INT8 canonical repeat | `BLOCKED` | Embedding and ranking drift exceed the frozen repeated-inference envelope. |
+| Runtime provenance | `INCONCLUSIVE` | The frozen batch-size envelope does not cover canonical baseline variation. |
 | Stage 1 | `NOT STARTED` | The fail-closed gate holds; Transition B remains `FAIL`. |
 
-Replay is model-free and verified. No threshold or frozen evidence was changed.
+Stage 0 and runtime-provenance replay are model-free and verified. No threshold or frozen evidence was changed.
 <!-- /m1-stage0-status -->
