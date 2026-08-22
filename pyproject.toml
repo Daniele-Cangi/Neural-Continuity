@@ -45,6 +45,7 @@ neural-continuity-m1-diagnostic-fidelity = "neural_continuity.m1_diagnostics.fid
 neural-continuity-m1-diagnostic-activation = "neural_continuity.m1_diagnostics.activation_cli:main"
 neural-continuity-m1-diagnostic-analysis = "neural_continuity.m1_diagnostics.activation_analysis_cli:main"
 neural-continuity-m1-diagnostic-clusters = "neural_continuity.m1_diagnostics.structural_cluster_cli:main"
+neural-continuity-m1-diagnostic-causal-plan = "neural_continuity.m1_diagnostics.causal_plan_cli:main"
 
 [project.urls]
 Repository = "https://github.com/Daniele-Cangi/Neural-Continuity"
