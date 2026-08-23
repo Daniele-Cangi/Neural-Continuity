@@ -279,8 +279,8 @@ It produces evidence-bounded continuity decisions. It does **not** certify unive
 | FP32 canonical repeat | `BLOCKED` | Rankings are stable; numerical drift exceeds the frozen repeated-inference envelope. |
 | INT8 canonical repeat | `BLOCKED` | Embedding and ranking drift exceed the frozen repeated-inference envelope. |
 | Runtime provenance | `INCONCLUSIVE` | The frozen batch-size envelope does not cover canonical baseline variation. |
-| Measurement-null extension | `ACTIVE SENTINEL` | The preregistered design is frozen; sentinel is 110/120 and full-corpus qualification has not started. |
-| Sentinel executor | `ACTIVE 110/120` | Checkpoints 1-110 are replay-verified; technical-only, non-qualifying, and full-corpus execution remains unavailable. |
+| Measurement-null extension | `SENTINEL COMPLETE` | The preregistered 120/120 sentinel is replay-verified; qualifying full-corpus execution has not started. |
+| Sentinel executor | `COMPLETE 120/120` | Checkpoints 1-120 are replay-verified; technical-only, non-qualifying, and full-corpus execution remains unavailable. |
 | Stage 1 | `NOT STARTED` | The fail-closed gate holds; Transition B remains `FAIL`. |
 
 Stage 0, runtime-provenance, and measurement-null-plan replay are model-free and verified. No threshold or frozen evidence was changed.
