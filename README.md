@@ -12,6 +12,7 @@
   <img src="https://img.shields.io/badge/evidence-tamper--evident-167D8D?style=flat-square" alt="Tamper-evident evidence">
   <img src="https://img.shields.io/badge/diagnostics-model--free-C36B2B?style=flat-square" alt="Model-free diagnostics">
   <img src="https://img.shields.io/badge/causal%20plan-pre--registered-2F6F5E?style=flat-square" alt="Causal plan pre-registered">
+  <a href="https://www.codetriage.com/daniele-cangi/neural-continuity"><img src="https://www.codetriage.com/daniele-cangi/neural-continuity/badges/users.svg" alt="Open Source Helpers"></a>
 </p>
 
 <p align="center">
