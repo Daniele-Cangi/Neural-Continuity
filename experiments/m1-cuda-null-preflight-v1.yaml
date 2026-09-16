@@ -1,0 +1,67 @@
+spec_id: m1-cuda-null-source-only-preflight-v1
+version: 1
+status: SPECIFICATION_ONLY_NOT_AUTHORIZED
+purpose: technical_plumbing_only
+qualifying_m1_evidence: false
+frozen_authority:
+  parent_config_sha256: df1a171d93e7fa07909e3f24b552baccd592a7239c5e6a5c4e3f972c475551d3
+  static_manifest_sha256: 1e762db2ef7fb52c20a2d49f454161c1e4e945bc14bfe5f2cf7cb8916457856f
+  static_authority_sha256: f621b08bd1e4f9bc5697c0825dcab07301010f7e41bee8e992ee825f191a0cd6
+  dataset_manifest_sha256: 0746d98f5e69c6a0ee48ca3f47b342de1d968a877c90df26ffe8f893437fd5de
+  transition_a_manifest_sha256: 12566ccbcc7f3f74a799abca2189a9b0906efd44a0f038ce0dc7c44b7b87fc3a
+  source_onnx_sha256: 5c0d999bd6b5e64e36cad1f61a83ef8e7507d55be49086745780fabb7c648511
+  teacher_manifest_sha256: c7a4548f10bcf8229c70d5fa7ef8676c7f9b7b03e5a1a515f2dad093f43ed724
+authorization:
+  technical_preflight_permission: NOT_GRANTED
+  requires_external_spec_sha256: true
+  requires_independent_review: true
+  requires_fresh_live_static_authority: true
+  requires_exact_runtime_and_mapped_dll_verification: true
+  full_corpus_permission: false
+  sentinel_permission: false
+  int8_permission: false
+  holdout_permission: false
+  tolerance_change_permission: false
+workload:
+  source_role: verified_transition_a_onnx_fp32
+  dataset_role: measurement_null
+  document_selection: first_64_document_ids_lexicographic_utf8_ascending
+  query_selection: first_64_measurement_null_query_ids_lexicographic_utf8_ascending
+  document_count: 64
+  query_count: 64
+  preprocessing: frozen_teacher_snapshot
+  max_sequence_length: 256
+  normalization: l2_unit_after_encode
+  embedding_dimension: 384
+  execution_providers:
+    - CUDAExecutionProvider
+    - CPUExecutionProvider
+  runs:
+    - {role: documents, batch_size: 1}
+    - {role: documents, batch_size: 16}
+    - {role: documents, batch_size: 64}
+    - {role: measurement_null_queries, batch_size: 1}
+    - {role: measurement_null_queries, batch_size: 16}
+    - {role: measurement_null_queries, batch_size: 64}
+technical_checks:
+  source_only: true
+  require_exact_session_provider_order: true
+  require_cuda_activity_in_each_run_profile: true
+  classify_cpu_events_by_operator: true
+  block_unclassified_cpu_events: true
+  block_undeclared_providers: true
+  block_nonfinite_or_wrong_dimension_outputs: true
+  no_node_name_index_tensor_name_or_benchmark_exceptions: true
+  no_latency_or_accuracy_threshold: true
+  no_scientific_decision: true
+evidence:
+  artifacts:
+    - runtime-inventory.json
+    - input-identity.json
+    - source-observations.npz
+    - provider-profile.jsonl
+    - technical-decision.json
+    - replay-bundle.json
+  external_artifact_manifest_sha256_required: true
+  replay_without_model: true
+  declared_missing_artifact_or_observation: BLOCKED
