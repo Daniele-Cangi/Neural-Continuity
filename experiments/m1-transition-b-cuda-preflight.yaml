@@ -1,0 +1,60 @@
+experiment_name: M1_TRANSITION_B_HYBRID_CUDA_PREFLIGHT_V1
+
+scope:
+  qualifying_m1_evidence: false
+  full_corpus_authorized: false
+  scientific_decision: NOT_EVALUATED
+  limitation: >-
+    Bounded execution preflight only. It does not extend the frozen CPU authority,
+    estimate a null envelope, or make a Transition B continuity decision.
+
+base_authority:
+  config_path: experiments/m1-transition-b-onnx-null.yaml
+  authority_sha256: 4df09b32623d81f8e1ce6f1040e2b270ad88008832ff1a5835be25d0e93cfa31
+  source_artifact_sha256: 5c0d999bd6b5e64e36cad1f61a83ef8e7507d55be49086745780fabb7c648511
+
+candidate:
+  manifest_file: candidate-manifest.json
+  manifest_sha256: d11888e48e24a9e29f5bdfac48ad7ace4204fb7b101e3531faa0f11190ad562c
+  quantization_config_file: quantization-config.json
+  quantization_config_sha256: dcc9949f9a64de512cf43378db436c017e8d6870effe20b57d89cdecea740351
+  artifact_file: teacher-int8-qdq.onnx
+  artifact_sha256: 8b28688438e249c42b523e276333a3a009ca30d0754a3ba6fcbb10d76de873e5
+  expected_quantization:
+    format: QDQ
+    activation_type: QUInt8
+    weight_type: QInt8
+    calibration_method: MinMax
+    per_channel: true
+
+provider_policy:
+  ordered_providers:
+    - CUDAExecutionProvider
+    - CPUExecutionProvider
+  require_cuda_activity: true
+  classify_cpu_fallback_by_operator_type: true
+  reject_undeclared_providers: true
+  node_name_exceptions: false
+  tensor_name_exceptions: false
+  benchmark_specific_exceptions: false
+
+runtime:
+  onnxruntime_version: 1.28.0
+  expected_gpu:
+    name: NVIDIA GeForce RTX 2060
+    uuid: GPU-ae391850-862c-ae92-0bd8-5b68015c4cf5
+    compute_capability: "7.5"
+
+document_count: 256
+query_count: 81
+
+benchmark:
+  runs:
+    - label: batch_1_primary
+      batch_size: 1
+    - label: batch_16_primary
+      batch_size: 16
+    - label: batch_16_repeat
+      batch_size: 16
+    - label: batch_64_primary
+      batch_size: 64
