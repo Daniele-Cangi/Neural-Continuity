@@ -24,6 +24,25 @@ ARTIFACT_NAMES = (
 
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _PROVIDERS = ("CUDAExecutionProvider", "CPUExecutionProvider")
+_FROZEN_LAYOUT = [
+    {"label": "batch_1_primary", "batch_size": 1},
+    {"label": "batch_16_primary", "batch_size": 16},
+    {"label": "batch_16_repeat", "batch_size": 16},
+    {"label": "batch_64_primary", "batch_size": 64},
+]
+
+
+def _frozen_layout_matches(value: object) -> bool:
+    if not isinstance(value, list) or len(value) != len(_FROZEN_LAYOUT):
+        return False
+    return all(
+        isinstance(run, Mapping)
+        and set(run) == {"label", "batch_size"}
+        and run.get("label") == frozen["label"]
+        and type(run.get("batch_size")) is int
+        and run["batch_size"] == frozen["batch_size"]
+        for run, frozen in zip(value, _FROZEN_LAYOUT, strict=True)
+    )
 
 
 def _write_json(path: Path, value: Mapping[str, Any]) -> None:
@@ -94,6 +113,8 @@ def _valid_embedding(record: object, count: int) -> int | None:
 
 def _valid_run(run: object, layout: object, document_count: int, query_count: int) -> int | None:
     if not isinstance(run, Mapping) or not isinstance(layout, Mapping):
+        return None
+    if type(run.get("batch_size")) is not int:
         return None
     if run.get("label") != layout.get("label") or run.get("batch_size") != layout.get("batch_size"):
         return None
@@ -180,8 +201,7 @@ def _decision(
         and document_count > 0
         and type(query_count) is int
         and query_count > 0
-        and isinstance(expected_layout, list)
-        and len(expected_layout) == 4
+        and _frozen_layout_matches(expected_layout)
     )
     dimensions: set[int] = set()
     for model_label in ("source_fp32", "candidate_int8_qdq"):
@@ -283,6 +303,8 @@ def replay_cuda_preflight(bundle_path: str | Path, expected_manifest_sha256: str
     bundle_file = Path(bundle_path).resolve()
     package = bundle_file.parent
     try:
+        if bundle_file != package / "replay-bundle.json":
+            raise ValueError("replay bundle is not the manifest-listed artifact")
         manifest_path = package / "artifact-manifest.json"
         if (
             not isinstance(expected_manifest_sha256, str)
@@ -291,6 +313,14 @@ def replay_cuda_preflight(bundle_path: str | Path, expected_manifest_sha256: str
         ):
             raise ValueError("artifact manifest SHA-256 differs from external authority")
         bundle = _read_mapping(bundle_file)
+        if (
+            type(bundle.get("version")) is not int
+            or bundle["version"] != 1
+            or bundle.get("kind") != "m1_cuda_hybrid_preflight_replay_bundle"
+            or bundle.get("model_required_for_replay") is not False
+            or bundle.get("onnx_graph_required_for_replay") is not False
+        ):
+            raise ValueError("replay bundle schema is invalid")
         manifest = _read_mapping(manifest_path)
         if manifest.get("kind") != "m1_cuda_hybrid_preflight_artifact_manifest":
             raise ValueError("artifact manifest kind is invalid")
@@ -351,7 +381,15 @@ def replay_cuda_preflight(bundle_path: str | Path, expected_manifest_sha256: str
             "model_loaded": False,
             "onnx_graph_loaded": False,
         }
-    except (KeyError, OSError, TypeError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
+    except (
+        KeyError,
+        OSError,
+        OverflowError,
+        TypeError,
+        ValueError,
+        UnicodeError,
+        json.JSONDecodeError,
+    ) as exc:
         return {
             "version": 1,
             "kind": "m1_cuda_hybrid_preflight_replay_result",

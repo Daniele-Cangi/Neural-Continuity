@@ -193,3 +193,89 @@ def test_invalid_utf8_replay_artifact_fails_closed(tmp_path: Path) -> None:
     new_hash = _rebind_artifact(package, runtime.name)
     result = replay_cuda_preflight(package / "replay-bundle.json", new_hash)
     assert result["replay_status"] == "BLOCKED"
+
+
+def test_unlisted_sibling_bundle_fails_closed(tmp_path: Path) -> None:
+    package, manifest_hash = write_cuda_preflight_package(
+        _authority(), _runtime_result(), tmp_path / "package"
+    )
+    other = package / "unlisted-bundle.json"
+    other.write_bytes((package / "replay-bundle.json").read_bytes())
+    result = replay_cuda_preflight(other, manifest_hash)
+    assert result["replay_status"] == "BLOCKED"
+    assert result["artifact_integrity"] is False
+
+
+def test_huge_json_number_fails_closed(tmp_path: Path) -> None:
+    package, _ = write_cuda_preflight_package(_authority(), _runtime_result(), tmp_path / "package")
+    benchmark = package / "benchmark-summary.json"
+    payload = json.loads(benchmark.read_text(encoding="utf-8"))
+    payload["source_fp32"][0]["elapsed_seconds"] = 10**400
+    benchmark.write_text(json.dumps(payload), encoding="utf-8")
+    manifest_hash = _rebind_artifact(package, benchmark.name)
+    result = replay_cuda_preflight(package / "replay-bundle.json", manifest_hash)
+    assert result["replay_status"] == "BLOCKED"
+
+
+def test_boolean_batch_size_fails_closed(tmp_path: Path) -> None:
+    package, _ = write_cuda_preflight_package(_authority(), _runtime_result(), tmp_path / "package")
+    benchmark = package / "benchmark-summary.json"
+    payload = json.loads(benchmark.read_text(encoding="utf-8"))
+    payload["source_fp32"][0]["batch_size"] = True
+    benchmark.write_text(json.dumps(payload), encoding="utf-8")
+    manifest_hash = _rebind_artifact(package, benchmark.name)
+    result = replay_cuda_preflight(package / "replay-bundle.json", manifest_hash)
+    assert result["replay_status"] == "BLOCKED"
+    assert result["benchmark_scope_match"] is False
+
+
+def test_replay_rejects_nonfrozen_layout_even_when_records_match(tmp_path: Path) -> None:
+    package, _ = write_cuda_preflight_package(_authority(), _runtime_result(), tmp_path / "package")
+    authority_path = package / "cuda-authority.json"
+    authority = json.loads(authority_path.read_text(encoding="utf-8"))
+    authority["run_layout"][0]["label"] = "different"
+    authority_path.write_text(json.dumps(authority), encoding="utf-8")
+    _rebind_artifact(package, authority_path.name)
+    benchmark_path = package / "benchmark-summary.json"
+    benchmark = json.loads(benchmark_path.read_text(encoding="utf-8"))
+    for model in ("source_fp32", "candidate_int8_qdq"):
+        benchmark[model][0]["label"] = "different"
+    benchmark_path.write_text(json.dumps(benchmark), encoding="utf-8")
+    manifest_hash = _rebind_artifact(package, benchmark_path.name)
+    result = replay_cuda_preflight(package / "replay-bundle.json", manifest_hash)
+    assert result["replay_status"] == "BLOCKED"
+    assert result["benchmark_scope_match"] is False
+
+
+def test_boolean_authority_batch_size_fails_closed(tmp_path: Path) -> None:
+    package, _ = write_cuda_preflight_package(_authority(), _runtime_result(), tmp_path / "package")
+    authority_path = package / "cuda-authority.json"
+    authority = json.loads(authority_path.read_text(encoding="utf-8"))
+    authority["run_layout"][0]["batch_size"] = True
+    authority_path.write_text(json.dumps(authority), encoding="utf-8")
+    manifest_hash = _rebind_artifact(package, authority_path.name)
+    result = replay_cuda_preflight(package / "replay-bundle.json", manifest_hash)
+    assert result["replay_status"] == "BLOCKED"
+    assert result["benchmark_scope_match"] is False
+
+
+def test_replay_bundle_flags_are_required(tmp_path: Path) -> None:
+    package, _ = write_cuda_preflight_package(_authority(), _runtime_result(), tmp_path / "package")
+    bundle = package / "replay-bundle.json"
+    payload = json.loads(bundle.read_text(encoding="utf-8"))
+    payload["model_required_for_replay"] = True
+    bundle.write_text(json.dumps(payload), encoding="utf-8")
+    manifest_hash = _rebind_artifact(package, bundle.name)
+    result = replay_cuda_preflight(bundle, manifest_hash)
+    assert result["replay_status"] == "BLOCKED"
+
+
+def test_boolean_replay_bundle_version_fails_closed(tmp_path: Path) -> None:
+    package, _ = write_cuda_preflight_package(_authority(), _runtime_result(), tmp_path / "package")
+    bundle = package / "replay-bundle.json"
+    payload = json.loads(bundle.read_text(encoding="utf-8"))
+    payload["version"] = True
+    bundle.write_text(json.dumps(payload), encoding="utf-8")
+    manifest_hash = _rebind_artifact(package, bundle.name)
+    result = replay_cuda_preflight(bundle, manifest_hash)
+    assert result["replay_status"] == "BLOCKED"

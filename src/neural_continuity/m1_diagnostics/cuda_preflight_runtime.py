@@ -83,10 +83,15 @@ def capture_runtime_inventory(authority: CudaPreflightAuthority) -> dict[str, An
             )
 
     ort_version = _distribution_version("onnxruntime-gpu")
-    if ort_version != authority.expected_onnxruntime_version:
+    module_version = getattr(ort, "__version__", None)
+    if (
+        ort_version != authority.expected_onnxruntime_version
+        or module_version != authority.expected_onnxruntime_version
+    ):
         raise CudaPreflightBlocked(
             "onnxruntime-gpu version mismatch: "
-            f"expected {authority.expected_onnxruntime_version}, observed {ort_version}"
+            f"expected {authority.expected_onnxruntime_version}, "
+            f"distribution {ort_version}, imported module {module_version}"
         )
     available = ort.get_available_providers()
     missing = [name for name in authority.provider_order if name not in available]
@@ -168,10 +173,13 @@ def _run_model(
 def _profile_summary(profile_path: Path, declared: tuple[str, ...]) -> dict[str, Any]:
     try:
         events = json.loads(profile_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise CudaPreflightBlocked(f"invalid ONNX Runtime profile: {profile_path}") from exc
     finally:
         profile_path.unlink(missing_ok=True)
+
+    if not isinstance(events, list):
+        raise CudaPreflightBlocked("ONNX Runtime profile root must be a list")
 
     provider_counts: dict[str, int] = {}
     operator_counts: dict[str, dict[str, int]] = {}

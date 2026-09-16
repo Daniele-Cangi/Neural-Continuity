@@ -82,7 +82,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         }
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
-    except (CudaPreflightBlocked, FileExistsError, ValueError) as exc:
+    except (CudaPreflightBlocked, OSError, ValueError) as exc:
         print(
             json.dumps(
                 {
