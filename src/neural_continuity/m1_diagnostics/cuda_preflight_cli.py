@@ -28,6 +28,7 @@ def _parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     capture = subparsers.add_parser("capture")
     capture.add_argument("--config", required=True)
+    capture.add_argument("--config-sha256", required=True)
     capture.add_argument("--dataset-directory", required=True)
     capture.add_argument("--transition-a-bundle", required=True)
     capture.add_argument("--extension-plan-bundle", required=True)
@@ -36,13 +37,14 @@ def _parser() -> argparse.ArgumentParser:
     capture.add_argument("--output", required=True)
     replay = subparsers.add_parser("replay")
     replay.add_argument("--bundle", required=True)
+    replay.add_argument("--artifact-manifest-sha256", required=True)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.command == "replay":
-        result = replay_cuda_preflight(args.bundle)
+        result = replay_cuda_preflight(args.bundle, args.artifact_manifest_sha256)
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0 if result["replay_status"] == "PASS" else 2
 
@@ -54,9 +56,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             extension_plan_bundle=args.extension_plan_bundle,
             extension_plan_manifest_sha256=args.extension_plan_manifest_sha256,
             candidate_package=args.candidate_package,
+            expected_config_sha256=args.config_sha256,
         )
-        with tempfile.TemporaryDirectory(prefix="nc-m1-cuda-preflight-") as working:
-            runtime_result = run_cuda_preflight(authority, working)
+        with tempfile.TemporaryDirectory(
+            prefix="nc-m1-cuda-preflight-", ignore_cleanup_errors=True
+        ) as working:
+            try:
+                runtime_result = run_cuda_preflight(authority, working)
+            except CudaPreflightBlocked:
+                raise
+            except Exception as exc:
+                raise CudaPreflightBlocked(
+                    f"runtime execution error ({type(exc).__name__}): {exc}"
+                ) from exc
         output, manifest_sha256 = write_cuda_preflight_package(
             authority_record(authority), runtime_result, args.output
         )

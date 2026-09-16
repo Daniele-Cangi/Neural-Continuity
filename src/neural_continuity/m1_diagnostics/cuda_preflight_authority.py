@@ -69,10 +69,23 @@ def _assert_hash(path: Path, expected: str, label: str) -> None:
         )
 
 
+def _package_artifact_path(package: Path, relative: str, label: str) -> Path:
+    raw = Path(relative)
+    if raw.is_absolute() or raw.drive or ".." in raw.parts or raw == Path("."):
+        raise CudaPreflightBlocked(f"{label} must be package-relative: {relative}")
+    path = package / raw
+    if path.is_symlink():
+        raise CudaPreflightBlocked(f"{label} cannot be a symlink: {relative}")
+    resolved = path.resolve()
+    if not resolved.is_relative_to(package):
+        raise CudaPreflightBlocked(f"{label} escapes candidate package: {relative}")
+    return resolved
+
+
 def _load_json_mapping(path: Path, label: str) -> Mapping[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise CudaPreflightBlocked(f"{label} is not valid JSON: {path}") from exc
     return _mapping(value, label)
 
@@ -80,7 +93,7 @@ def _load_json_mapping(path: Path, label: str) -> Mapping[str, Any]:
 def _load_preflight_config(path: Path) -> tuple[Mapping[str, Any], str]:
     try:
         value = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as exc:
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
         raise CudaPreflightBlocked(f"preflight config is invalid: {path}") from exc
     config = _mapping(value, "preflight config")
     config_sha256 = hashlib.sha256(canonical_json_bytes(config)).hexdigest()
@@ -116,18 +129,21 @@ def _parse_run_layout(config: Mapping[str, Any]) -> tuple[tuple[str, int], ...]:
 
 
 def _verify_candidate(
-    config: Mapping[str, Any], candidate_package: str | Path
+    config: Mapping[str, Any], candidate_package: str | Path, base: SentinelAuthority
 ) -> CandidateAuthority:
     declared = _mapping(config.get("candidate"), "candidate")
     package = Path(candidate_package).resolve()
     if not package.is_dir():
         raise CudaPreflightBlocked(f"candidate package is missing: {package}")
 
-    manifest_path = package / _required_string(declared, "manifest_file", "candidate")
-    quantization_path = package / _required_string(
-        declared, "quantization_config_file", "candidate"
+    manifest_name = _required_string(declared, "manifest_file", "candidate")
+    quantization_name = _required_string(declared, "quantization_config_file", "candidate")
+    artifact_name = _required_string(declared, "artifact_file", "candidate")
+    manifest_path = _package_artifact_path(package, manifest_name, "candidate manifest")
+    quantization_path = _package_artifact_path(
+        package, quantization_name, "candidate quantization config"
     )
-    artifact_path = package / _required_string(declared, "artifact_file", "candidate")
+    artifact_path = _package_artifact_path(package, artifact_name, "candidate ONNX artifact")
     manifest_sha256 = _required_string(declared, "manifest_sha256", "candidate")
     quantization_sha256 = _required_string(declared, "quantization_config_sha256", "candidate")
     artifact_sha256 = _required_string(declared, "artifact_sha256", "candidate")
@@ -138,23 +154,42 @@ def _verify_candidate(
 
     manifest = _load_json_mapping(manifest_path, "candidate manifest")
     quantization = _load_json_mapping(quantization_path, "candidate quantization config")
-    manifest_material = canonical_json_bytes(manifest).decode("utf-8")
-    if artifact_path.name not in manifest_material or artifact_sha256 not in manifest_material:
-        raise CudaPreflightBlocked(
-            "candidate manifest does not bind the declared ONNX artifact and SHA-256"
-        )
+    if (
+        manifest.get("package_kind") != "m1_onnx_int8_static_qdq_candidate"
+        or manifest.get("candidate_status") != "CAPTURED_PENDING_OBSERVATION"
+    ):
+        raise CudaPreflightBlocked("candidate manifest kind or status is invalid")
+    source_identity = _mapping(manifest.get("source_identity"), "source_identity")
+    if source_identity.get("onnx_fp32_artifact_sha256") != base.source.artifact_sha256:
+        raise CudaPreflightBlocked("candidate source artifact identity mismatch")
+    entries = manifest.get("artifacts")
+    if not isinstance(entries, list):
+        raise CudaPreflightBlocked("candidate manifest artifact list is missing")
+    for name, expected_hash in (
+        (artifact_name, artifact_sha256),
+        (quantization_name, quantization_sha256),
+    ):
+        matches = [
+            entry for entry in entries if isinstance(entry, Mapping) and entry.get("path") == name
+        ]
+        if len(matches) != 1 or matches[0].get("sha256") != expected_hash:
+            raise CudaPreflightBlocked(
+                f"candidate manifest does not bind {name} to its declared SHA-256"
+            )
+    if manifest.get("quantization_configuration") != quantization:
+        raise CudaPreflightBlocked("candidate quantization manifest/config mismatch")
 
     expected_quantization = _mapping(
         declared.get("expected_quantization"), "candidate.expected_quantization"
     )
-    quantization_material = canonical_json_bytes(quantization).decode("utf-8")
     for key, expected_value in expected_quantization.items():
         if not isinstance(expected_value, str | bool | int | float):
             raise CudaPreflightBlocked(f"candidate.expected_quantization.{key} must be scalar")
-        encoded = json.dumps(expected_value, ensure_ascii=True, separators=(",", ":"))
-        if encoded not in quantization_material:
+        observed = quantization.get(key)
+        if type(observed) is not type(expected_value) or observed != expected_value:
             raise CudaPreflightBlocked(
-                f"quantization audit did not find declared value for {key}: " f"{expected_value!r}"
+                f"candidate quantization {key} mismatch: "
+                f"expected {expected_value!r}, observed {observed!r}"
             )
 
     return CandidateAuthority(
@@ -175,11 +210,17 @@ def verify_cuda_preflight_authority(
     extension_plan_bundle: str | Path,
     extension_plan_manifest_sha256: str,
     candidate_package: str | Path,
+    expected_config_sha256: str,
 ) -> CudaPreflightAuthority:
     """Verify every frozen authority before any ONNX graph may be loaded."""
 
     try:
         config, config_sha256 = _load_preflight_config(Path(config_path))
+        if config_sha256 != expected_config_sha256:
+            raise CudaPreflightBlocked(
+                "preflight config SHA-256 mismatch: "
+                f"expected {expected_config_sha256}, observed {config_sha256}"
+            )
         base = verify_sentinel_authority(
             config_path=_required_string(
                 _mapping(config.get("base_authority"), "base_authority"),
@@ -234,8 +275,15 @@ def verify_cuda_preflight_authority(
         raise CudaPreflightBlocked("CPU fallback must be classified by operator type")
     if provider_policy.get("reject_undeclared_providers") is not True:
         raise CudaPreflightBlocked("undeclared providers must be rejected")
+    for field in (
+        "node_name_exceptions",
+        "tensor_name_exceptions",
+        "benchmark_specific_exceptions",
+    ):
+        if provider_policy.get(field) is not False:
+            raise CudaPreflightBlocked(f"provider_policy.{field} must be false")
 
-    candidate = _verify_candidate(config, candidate_package)
+    candidate = _verify_candidate(config, candidate_package, base)
     run_layout = _parse_run_layout(config)
     runtime = _mapping(config.get("runtime"), "runtime")
     expected_gpu = _mapping(runtime.get("expected_gpu"), "runtime.expected_gpu")

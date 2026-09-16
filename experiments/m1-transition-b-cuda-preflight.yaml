@@ -21,11 +21,13 @@ candidate:
   artifact_file: teacher-int8-qdq.onnx
   artifact_sha256: 8b28688438e249c42b523e276333a3a009ca30d0754a3ba6fcbb10d76de873e5
   expected_quantization:
-    format: QDQ
+    mode: static
+    quantization_format: QDQ
     activation_type: QUInt8
     weight_type: QInt8
     calibration_method: MinMax
     per_channel: true
+    execution_provider: CPUExecutionProvider
 
 provider_policy:
   ordered_providers:

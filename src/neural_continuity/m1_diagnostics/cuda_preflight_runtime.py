@@ -181,16 +181,14 @@ def _profile_summary(profile_path: Path, declared: tuple[str, ...]) -> dict[str,
             continue
         args = event.get("args")
         if not isinstance(args, dict):
-            continue
+            raise CudaPreflightBlocked("ONNX profile Node event lacks arguments")
         provider = args.get("provider")
         if not isinstance(provider, str) or not provider:
-            continue
+            raise CudaPreflightBlocked("ONNX profile Node event lacks a provider")
         provider_counts[provider] = provider_counts.get(provider, 0) + 1
         op_name = args.get("op_name")
         if not isinstance(op_name, str) or not op_name:
-            if provider == "CPUExecutionProvider":
-                unclassified_cpu_events += 1
-            op_name = "UNCLASSIFIED"
+            raise CudaPreflightBlocked("ONNX profile Node event lacks an operator type")
         by_operator = operator_counts.setdefault(provider, {})
         by_operator[op_name] = by_operator.get(op_name, 0) + 1
 
