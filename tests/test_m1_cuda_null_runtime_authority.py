@@ -157,8 +157,12 @@ def test_mapped_inventory_includes_optional_names(
 
 @pytest.mark.parametrize("delimiter", [",", ", ", ",   "])
 def test_gpu_inventory_accepts_csv_whitespace(
-    delimiter: str, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, delimiter: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    trusted = tmp_path / "nvidia-smi.exe"
+    trusted.write_bytes(b"pinned utility")
+    monkeypatch.setattr(runtime_module, "NVIDIA_SMI_PATH", trusted)
+    monkeypatch.setattr(runtime_module, "NVIDIA_SMI_SHA256", sha256_file(trusted))
     fields = ["GPU", "GPU-test", "581.57", "7.5"]
     response = SimpleNamespace(stdout=delimiter.join(fields) + "\n")
     monkeypatch.setattr(runtime_module.subprocess, "run", lambda *args, **kwargs: response)
@@ -168,3 +172,41 @@ def test_gpu_inventory_accepts_csv_whitespace(
         "driver_version": "581.57",
         "compute_capability": "7.5",
     }
+
+
+def test_gpu_inventory_ignores_path_shadow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    trusted = tmp_path / "trusted" / "nvidia-smi.exe"
+    trusted.parent.mkdir()
+    trusted.write_bytes(b"pinned utility")
+    shadow = tmp_path / "shadow" / "nvidia-smi.exe"
+    shadow.parent.mkdir()
+    shadow.write_bytes(b"spoofed utility")
+    monkeypatch.setenv("PATH", str(shadow.parent))
+    monkeypatch.setattr(runtime_module, "NVIDIA_SMI_PATH", trusted)
+    monkeypatch.setattr(runtime_module, "NVIDIA_SMI_SHA256", sha256_file(trusted))
+    invoked: list[str] = []
+
+    def fake_run(command: list[str], **_: object) -> SimpleNamespace:
+        invoked.append(command[0])
+        return SimpleNamespace(stdout="GPU, GPU-test, 581.57, 7.5\n")
+
+    monkeypatch.setattr(runtime_module.subprocess, "run", fake_run)
+    runtime_module._gpu_inventory()
+    assert invoked == [str(trusted)]
+
+
+def test_gpu_inventory_rejects_changed_utility_before_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    trusted = tmp_path / "nvidia-smi.exe"
+    trusted.write_bytes(b"pinned utility")
+    monkeypatch.setattr(runtime_module, "NVIDIA_SMI_PATH", trusted)
+    monkeypatch.setattr(runtime_module, "NVIDIA_SMI_SHA256", sha256_file(trusted))
+    trusted.write_bytes(b"changed utility")
+    monkeypatch.setattr(
+        runtime_module.subprocess,
+        "run",
+        lambda *_, **__: pytest.fail("unverified NVIDIA utility was executed"),
+    )
+    with pytest.raises(CudaNullRuntimeBlocked, match="utility hash mismatch"):
+        runtime_module._gpu_inventory()

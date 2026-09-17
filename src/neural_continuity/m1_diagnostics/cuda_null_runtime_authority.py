@@ -26,6 +26,8 @@ from neural_continuity.m1_diagnostics.cuda_null_runtime_preimport import (
 )
 
 FROZEN_ENVIRONMENT = Path(r"D:\neural-continuity-runtime-cuda-v1")
+NVIDIA_SMI_PATH = Path(r"C:\Windows\System32\nvidia-smi.exe")
+NVIDIA_SMI_SHA256 = "957be91368f4d6f7bcad8723801c293d513af229f223f13215914244a0fec989"
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _DISTRIBUTIONS = {
     "onnxruntime_gpu_version": ("onnxruntime-gpu", "onnxruntime"),
@@ -168,9 +170,14 @@ def _load_runtime_pins(config_path: Path, external_config_sha256: str) -> Mappin
 
 
 def _gpu_inventory() -> dict[str, str]:
+    _require(
+        NVIDIA_SMI_PATH.is_file() and not has_linked_ancestor(NVIDIA_SMI_PATH),
+        "frozen NVIDIA utility missing or linked",
+    )
+    _require(sha256_file(NVIDIA_SMI_PATH) == NVIDIA_SMI_SHA256, "NVIDIA utility hash mismatch")
     result = subprocess.run(
         [
-            "nvidia-smi",
+            str(NVIDIA_SMI_PATH),
             "--query-gpu=name,uuid,driver_version,compute_cap",
             "--format=csv,noheader,nounits",
         ],
