@@ -1,0 +1,23 @@
+spec_id: m1-cuda-null-source-preflight-authorization-v2
+version: 2
+status: AUTHORIZED_AFTER_INDEPENDENT_REVIEW
+parent_spec_sha256: 31b517886f221c1577596eff97431bb8c6a0422ec9321b12e1a9ef8732267e4a
+readiness_record_sha256: 78c3ccc8dcc5cc62103c743cf69dde1b71f738b2a13793febf2918758ba990a3
+runtime_identity_sha256: 7df5acab2d9982362e83db0e34fcc926d22ff75efe832451e3073942b116e669
+scope:
+  source_only: true
+  dataset_role: measurement_null
+  document_count: 64
+  query_count: 64
+  ordered_providers: [CUDAExecutionProvider, CPUExecutionProvider]
+  batch_sizes: [1, 16, 64]
+  qualifying_m1_evidence: false
+  sentinel_allowed: false
+  full_corpus_allowed: false
+  int8_allowed: false
+  holdout_allowed: false
+  tolerance_change_allowed: false
+authorization:
+  technical_preflight_permission: GRANTED_AFTER_REVIEW
+  independent_review_required: true
+  external_reviewed_spec_sha256_required: true
