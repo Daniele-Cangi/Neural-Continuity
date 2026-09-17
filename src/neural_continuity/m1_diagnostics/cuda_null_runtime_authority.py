@@ -15,6 +15,10 @@ from typing import Any
 import yaml
 
 from neural_continuity.evidence import sha256_file
+from neural_continuity.m1_diagnostics.cuda_null_authority import (
+    CUDA_NULL_CONFIG_PATH,
+    CUDA_NULL_CONFIG_SHA256,
+)
 
 FROZEN_ENVIRONMENT = Path(r"D:\neural-continuity-runtime-cuda-v1")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -124,7 +128,12 @@ def _load_runtime_pins(config_path: Path, external_config_sha256: str) -> Mappin
     _require(
         _SHA256.fullmatch(external_config_sha256) is not None, "external config SHA-256 invalid"
     )
-    _require(sha256_file(config_path) == external_config_sha256, "config SHA-256 mismatch")
+    _require(config_path.resolve() == CUDA_NULL_CONFIG_PATH.resolve(), "config path mismatch")
+    _require(
+        external_config_sha256 == CUDA_NULL_CONFIG_SHA256,
+        "external config hash is not frozen",
+    )
+    _require(sha256_file(config_path) == CUDA_NULL_CONFIG_SHA256, "config SHA-256 mismatch")
     config = _mapping(yaml.safe_load(config_path.read_text(encoding="utf-8")), "CUDA null config")
     _require(config.get("status") == "DRAFT_NOT_EXECUTABLE", "unexpected config status")
     freeze = _mapping(config.get("freeze_gate"), "freeze gate")
@@ -211,28 +220,38 @@ def _mapped_dll_paths(names: set[str]) -> dict[str, Path]:
         if name is not None:
             found[name].add(path.resolve())
     for name, paths in found.items():
-        _require(len(paths) == 1, f"{name}: not uniquely mapped into this process")
-    return {name: next(iter(paths)) for name, paths in found.items()}
+        _require(len(paths) <= 1, f"{name}: multiple mapped paths")
+    return {name: next(iter(paths)) for name, paths in found.items() if paths}
 
 
-def _dll_inventory(root: Path) -> dict[str, dict[str, dict[str, str | bool]]]:
+def _dll_inventory(
+    root: Path, pins: Mapping[str, Any]
+) -> dict[str, dict[str, dict[str, str | bool]]]:
     import onnxruntime as ort
 
+    installed: dict[str, tuple[str, Path, str]] = {}
+    for group, names in _DLL_GROUPS.items():
+        expected_hashes = _mapping(pins[group], group)
+        for name, distribution_name in names.items():
+            installed_path = _file_from_distribution(distribution_name, name, root)
+            digest = sha256_file(installed_path)
+            _require(digest == expected_hashes[name], f"{name}: installed hash mismatch")
+            installed[name] = (distribution_name, installed_path, digest)
+
     ort.preload_dlls(directory="")
-    loaded_names = set(_CUDA_DLL_DISTRIBUTIONS) | set(_CUDNN_DLL_DISTRIBUTIONS)
-    mapped = _mapped_dll_paths(loaded_names)
+    mapped = _mapped_dll_paths(set(installed))
     observed: dict[str, dict[str, dict[str, str | bool]]] = {}
     for group, names in _DLL_GROUPS.items():
         group_observed: dict[str, dict[str, str | bool]] = {}
-        for name, distribution_name in names.items():
-            installed_path = _file_from_distribution(distribution_name, name, root)
+        for name in names:
+            distribution_name, installed_path, digest = installed[name]
             item: dict[str, str | bool] = {
                 "distribution": distribution_name,
                 "installed_path": str(installed_path),
-                "sha256": sha256_file(installed_path),
+                "sha256": digest,
             }
-            if name in loaded_names:
-                mapped_path = mapped[name]
+            mapped_path = mapped.get(name)
+            if mapped_path is not None:
                 _require(
                     mapped_path.is_relative_to(root), f"{name}: mapped outside frozen environment"
                 )
@@ -241,9 +260,7 @@ def _dll_inventory(root: Path) -> dict[str, dict[str, dict[str, str | bool]]]:
                 )
                 item["mapped_path"] = str(mapped_path)
                 item["mapped_sha256"] = sha256_file(mapped_path)
-                item["observed_loaded"] = True
-            else:
-                item["observed_loaded"] = False
+            item["observed_loaded"] = mapped_path is not None
             group_observed[name] = item
         observed[group] = group_observed
     return observed
@@ -277,8 +294,9 @@ def _compare_runtime(pins: Mapping[str, Any], observed: Mapping[str, Any]) -> No
             _require(
                 item.get("sha256") == expected_hashes[name], f"{name}: installed hash mismatch"
             )
-            if group in ("loaded_cuda_dll_sha256", "loaded_cudnn_dll_sha256"):
-                _require(item.get("observed_loaded") is True, f"{name}: not observed loaded")
+            loaded = item.get("observed_loaded")
+            _require(type(loaded) is bool, f"{name}: loaded state missing")
+            if loaded:
                 _require(
                     item.get("mapped_path") == item.get("installed_path"),
                     f"{name}: mapped path mismatch",
@@ -287,9 +305,21 @@ def _compare_runtime(pins: Mapping[str, Any], observed: Mapping[str, Any]) -> No
                     item.get("mapped_sha256") == expected_hashes[name],
                     f"{name}: mapped hash mismatch",
                 )
+            else:
+                _require(
+                    "mapped_path" not in item and "mapped_sha256" not in item,
+                    f"{name}: unmapped DLL has mapping evidence",
+                )
+            if group in ("loaded_cuda_dll_sha256", "loaded_cudnn_dll_sha256"):
+                _require(loaded is True, f"{name}: not observed loaded")
+            elif group == "installed_not_observed_loaded_dll_sha256":
+                _require(loaded is False, f"{name}: unexpectedly loaded")
+            elif name == "onnxruntime_pybind11_state.pyd":
+                _require(loaded is True, f"{name}: imported binary not mapped")
     providers = observed.get("available_providers")
     if not isinstance(providers, list):
         raise CudaNullRuntimeBlocked("available providers missing")
+    # Available providers are capabilities, not the providers selected by a session.
     _require(
         {"CUDAExecutionProvider", "CPUExecutionProvider"}.issubset(set(providers)),
         "CUDA/CPU provider unavailable",
@@ -315,7 +345,7 @@ def verify_runtime_identity(config_path: Path, external_config_sha256: str) -> d
             "python_version": platform.python_version(),
             "gpu": _gpu_inventory(),
             "software": _distribution_inventory(root),
-            "dlls": _dll_inventory(root),
+            "dlls": _dll_inventory(root, pins),
             "available_providers": ort.get_available_providers(),
             "onnx_graph_loaded": False,
             "session_created": False,

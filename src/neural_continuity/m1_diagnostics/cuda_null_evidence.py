@@ -254,8 +254,15 @@ def replay_static_package(bundle_path: Path, external_manifest_sha256: str) -> d
     """Replay solely from hashed JSON files; no source model or runtime import."""
     try:
         _require(
-            bundle_path.name == "replay-bundle.json" and not bundle_path.is_symlink(),
+            bundle_path.name == "replay-bundle.json",
             "replay bundle path mismatch",
+        )
+        _require(
+            not any(
+                part.is_symlink() or getattr(part, "is_junction", lambda: False)()
+                for part in (bundle_path, *bundle_path.parents)
+            ),
+            "replay package path contains a symlink or junction",
         )
         root = bundle_path.parent.resolve()
         expected_manifest_sha256 = _sha(external_manifest_sha256, "external manifest")

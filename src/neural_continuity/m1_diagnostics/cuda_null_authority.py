@@ -33,6 +33,8 @@ HISTORICAL_CUDA_MANIFEST_SHA256 = "276ba5286ffb38ddab1aa2e9101142fdde5e8eb20db6d
 DATASET_ID = "nc-m1-beir-scifact-v1"
 MODEL_ID = "sentence-transformers/all-MiniLM-L6-v2"
 MODEL_REVISION = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
+CUDA_NULL_CONFIG_PATH = Path(__file__).resolve().parents[3] / "experiments" / "m1-cuda-null-v1.yaml"
+CUDA_NULL_CONFIG_SHA256 = "df1a171d93e7fa07909e3f24b552baccd592a7239c5e6a5c4e3f972c475551d3"
 ROLE_ORDER = (
     "contract_development",
     "final_holdout",
@@ -400,12 +402,15 @@ def _verify_source(bundle_path: Path, snapshot_root: Path) -> dict[str, Any]:
 
 def _verify_config(config_path: Path, external_sha256: str) -> str:
     _require(
-        config_path.resolve()
-        == (Path(__file__).resolve().parents[3] / "experiments" / "m1-cuda-null-v1.yaml").resolve(),
+        config_path.resolve() == CUDA_NULL_CONFIG_PATH.resolve(),
         "CUDA null config path mismatch",
     )
     _require(
-        sha256_file(config_path) == _digest(external_sha256, "external config SHA-256"),
+        _digest(external_sha256, "external config SHA-256") == CUDA_NULL_CONFIG_SHA256,
+        "CUDA null external config hash is not frozen",
+    )
+    _require(
+        sha256_file(config_path) == CUDA_NULL_CONFIG_SHA256,
         "CUDA null config hash mismatch",
     )
     try:
@@ -499,5 +504,7 @@ def build_static_authority(
             "activation_read": False,
             "execution_authorized": False,
         }
-    except (OSError, ValueError, TypeError, KeyError) as exc:
+    except CudaNullAuthorityBlocked:
+        raise
+    except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
         raise CudaNullAuthorityBlocked(f"static authority could not be verified: {exc}") from exc

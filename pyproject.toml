@@ -22,7 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest>=8.0", "pytest-cov>=5.0"]
 sentence-transformers = ["sentence-transformers>=2.6"]
-onnx = ["onnx>=1.16", "onnxruntime>=1.18", "onnxscript>=0.1"]
+onnx = ["onnx>=1.16", "onnxruntime>=1.21", "onnxscript>=0.1"]
 dev = ["ruff>=0.6", "black>=24.0", "mypy>=1.10"]
 
 [project.scripts]
