@@ -42,6 +42,12 @@ def _stubbed_runner(
         events.append("runtime")
         return inventory
 
+    def reverify_source(_bundle: Path, _snapshot: Path) -> dict[str, object]:
+        events.append("snapshot")
+        if mode == "snapshot" or (mode == "snapshot_after" and events.count("snapshot") == 2):
+            raise ValueError("snapshot mismatch")
+        return {"status": "verified"}
+
     class Teacher:
         max_seq_length = 256
 
@@ -105,8 +111,15 @@ def _stubbed_runner(
         identity={"kind": "stubbed"},
     )
     monkeypatch.setattr(runtime, "verify_source_preflight_authority", authority)
-    monkeypatch.setattr(runtime, "load_source_preflight_inputs", lambda *_: inputs)
+
+    def load_inputs(*_args: object) -> SimpleNamespace:
+        if mode == "inputs":
+            raise ValueError("corrupt materialization")
+        return inputs
+
+    monkeypatch.setattr(runtime, "load_source_preflight_inputs", load_inputs)
     monkeypatch.setattr(runtime, "verify_runtime_identity", verified_runtime)
+    monkeypatch.setattr(runtime, "_verify_source", reverify_source)
     monkeypatch.setattr(runtime, "_profiled_session", profiled_session)
     monkeypatch.setattr(runtime, "encode_onnx_source", encode)
     monkeypatch.setattr(runtime, "_profile_summary", profile_summary)
@@ -135,7 +148,7 @@ def test_source_runner_captures_six_independent_profiles_in_frozen_order(
     arguments, events, sessions = _stubbed_runner(monkeypatch, tmp_path)
     capture = runtime.capture_source_preflight(**arguments)
     names = [f"{role}_batch_{batch}" for role, batch in FROZEN_RUNS]
-    assert events[:3] == ["authority", "runtime", "teacher"]
+    assert events[:5] == ["authority", "runtime", "snapshot", "teacher", "snapshot"]
     assert [session.name for session in sessions] == names
     assert all(session.ended for session in sessions)
     assert [profile["observation_name"] for profile in capture["provider_profiles"]] == names
@@ -153,6 +166,9 @@ def test_source_runner_captures_six_independent_profiles_in_frozen_order(
     ("mode", "message"),
     [
         ("authority", "authority blocked"),
+        ("inputs", "frozen source inputs"),
+        ("snapshot", "teacher snapshot or source changed"),
+        ("snapshot_after", "teacher snapshot or source changed"),
         ("encode", "synthetic encode failure"),
         ("shape", "invalid source embedding shape"),
         ("profile", "CUDA provider activity absent"),
@@ -164,8 +180,11 @@ def test_source_runner_fails_closed_and_ends_started_session(
     arguments, events, sessions = _stubbed_runner(monkeypatch, tmp_path, mode)
     with pytest.raises(ValueError, match=message):
         runtime.capture_source_preflight(**arguments)
-    if mode == "authority":
-        assert events == ["authority"]
+    if mode in {"authority", "inputs", "snapshot", "snapshot_after"}:
+        if mode == "authority":
+            assert events == ["authority"]
+        if mode == "snapshot":
+            assert "teacher" not in events
         assert not sessions
     else:
         assert len(sessions) == 1

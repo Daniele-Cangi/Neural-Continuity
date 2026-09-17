@@ -8,6 +8,7 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
+from neural_continuity.m1_diagnostics.cuda_null_runtime_authority import CudaNullRuntimeBlocked
 from neural_continuity.m1_diagnostics.cuda_null_source_preflight_authority import (
     CudaNullSourcePreflightBlocked,
 )
@@ -15,6 +16,7 @@ from neural_continuity.m1_diagnostics.cuda_null_source_preflight_evidence import
     replay_source_preflight,
     write_source_preflight_package,
 )
+from neural_continuity.m1_diagnostics.cuda_preflight_authority import CudaPreflightBlocked
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -76,7 +78,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 historical_cuda_bundle=arguments.historical_cuda_bundle,
                 working_directory=Path(working),
             )
-    except CudaNullSourcePreflightBlocked as exc:
+    except (CudaNullSourcePreflightBlocked, CudaNullRuntimeBlocked, CudaPreflightBlocked) as exc:
         print(json.dumps({"status": "BLOCKED", "reason": str(exc)}, sort_keys=True))
         return 2
     except Exception as exc:

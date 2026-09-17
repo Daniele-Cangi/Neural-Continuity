@@ -340,6 +340,8 @@ def replay_source_preflight(bundle_path: Path, external_manifest_sha256: str) ->
         if {entry.name for entry in package.iterdir()} != expected_files:
             raise ValueError("declared preflight artifact set is incomplete or expanded")
         manifest_path = package / "artifact-manifest.json"
+        if has_linked_ancestor(manifest_path) or not manifest_path.is_file():
+            raise ValueError("artifact manifest is linked or not a regular file")
         if sha256_file(manifest_path) != external_manifest_sha256:
             raise ValueError("artifact manifest differs from external SHA-256")
         manifest = _read_json(manifest_path)

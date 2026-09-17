@@ -189,6 +189,20 @@ def test_output_path_normalizes_before_repository_containment(tmp_path: Path) ->
         evidence._external_output_directory(disguised)
 
 
+def test_linked_artifact_manifest_fails_closed(monkeypatch: object, tmp_path: Path) -> None:
+    capture = _capture(monkeypatch)
+    output, manifest_hash = evidence.write_source_preflight_package(capture, tmp_path / "run")
+    original = evidence.has_linked_ancestor
+
+    def linked_manifest(path: Path) -> bool:
+        return path.name == "artifact-manifest.json" or original(path)
+
+    monkeypatch.setattr(evidence, "has_linked_ancestor", linked_manifest)
+    replay = evidence.replay_source_preflight(output / "replay-bundle.json", manifest_hash)
+    assert replay["replay_status"] == "BLOCKED"
+    assert "artifact manifest" in replay["reason"]
+
+
 def test_resealed_oversized_profile_number_fails_closed(
     monkeypatch: object, tmp_path: Path
 ) -> None:

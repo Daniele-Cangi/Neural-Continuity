@@ -12,11 +12,16 @@ import numpy as np
 
 from neural_continuity.evidence import canonical_json_bytes
 from neural_continuity.m1_b.onnx_source import encode_onnx_source
+from neural_continuity.m1_diagnostics.cuda_null_authority import (
+    CudaNullAuthorityBlocked,
+    _verify_source,
+)
 from neural_continuity.m1_diagnostics.cuda_null_runtime_authority import (
     verify_runtime_identity,
 )
 from neural_continuity.m1_diagnostics.cuda_null_source_preflight_authority import (
     RUNTIME_IDENTITY_SHA256,
+    CudaNullSourcePreflightBlocked,
     verify_source_preflight_authority,
 )
 from neural_continuity.m1_diagnostics.cuda_null_source_preflight_inputs import (
@@ -33,6 +38,15 @@ from neural_continuity.m1_diagnostics.cuda_preflight_runtime import (
 )
 
 PROVIDERS = ("CUDAExecutionProvider", "CPUExecutionProvider")
+
+
+def _reverify_teacher_source(transition_a_bundle: Path, snapshot_root: Path) -> None:
+    try:
+        _verify_source(transition_a_bundle, snapshot_root)
+    except (CudaNullAuthorityBlocked, OSError, ValueError) as exc:
+        raise CudaNullSourcePreflightBlocked(
+            "teacher snapshot or source changed before inference"
+        ) from exc
 
 
 def capture_source_preflight(
@@ -75,7 +89,12 @@ def capture_source_preflight(
         or authority.get("int8_allowed") is not False
     ):
         raise ValueError("source-only preflight authority did not grant the bounded scope")
-    inputs = load_source_preflight_inputs(dataset_root, transition_a_bundle, teacher_snapshot_root)
+    try:
+        inputs = load_source_preflight_inputs(
+            dataset_root, transition_a_bundle, teacher_snapshot_root
+        )
+    except (OSError, ValueError) as exc:
+        raise CudaNullSourcePreflightBlocked("frozen source inputs did not verify") from exc
     runtime = verify_runtime_identity(config_path, external_config_sha256)
     runtime_hash = hashlib.sha256(canonical_json_bytes(runtime) + b"\n").hexdigest()
     if runtime_hash != RUNTIME_IDENTITY_SHA256:
@@ -85,10 +104,12 @@ def capture_source_preflight(
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
     from sentence_transformers import SentenceTransformer
 
+    _reverify_teacher_source(transition_a_bundle, inputs.snapshot_root)
     teacher = SentenceTransformer(str(inputs.snapshot_root), device="cpu")
+    _reverify_teacher_source(transition_a_bundle, inputs.snapshot_root)
     teacher.eval()
     if teacher.max_seq_length != MAX_SEQUENCE_LENGTH:
-        raise ValueError("teacher tokenizer maximum sequence length mismatch")
+        raise CudaNullSourcePreflightBlocked("teacher tokenizer maximum sequence length mismatch")
 
     working = Path(working_directory)
     working.mkdir(parents=True, exist_ok=True)
