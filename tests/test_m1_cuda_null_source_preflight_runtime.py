@@ -31,16 +31,16 @@ def _stubbed_runner(
         events.append("authority")
         if mode == "authority":
             raise ValueError("authority blocked")
+        runtime_inventory = _kwargs["runtime_inventory_out"]
+        assert isinstance(runtime_inventory, dict)
+        runtime_inventory.update(inventory)
+        events.append("runtime")
         return {
             "status": "SOURCE_ONLY_PREFLIGHT_AUTHORITY_VERIFIED",
             "technical_preflight_permission": "GRANTED_AFTER_REVIEW",
             "source_only": True,
             "int8_allowed": False,
         }
-
-    def verified_runtime(*_args: object) -> dict[str, object]:
-        events.append("runtime")
-        return inventory
 
     def reverify_source(_bundle: Path, _snapshot: Path) -> dict[str, object]:
         events.append("snapshot")
@@ -118,7 +118,6 @@ def _stubbed_runner(
         return inputs
 
     monkeypatch.setattr(runtime, "load_source_preflight_inputs", load_inputs)
-    monkeypatch.setattr(runtime, "verify_runtime_identity", verified_runtime)
     monkeypatch.setattr(runtime, "_verify_source", reverify_source)
     monkeypatch.setattr(runtime, "_profiled_session", profiled_session)
     monkeypatch.setattr(runtime, "encode_onnx_source", encode)

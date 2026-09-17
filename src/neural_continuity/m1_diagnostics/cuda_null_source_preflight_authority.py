@@ -87,6 +87,7 @@ def verify_source_preflight_authority(
     teacher_snapshot_root: Path,
     cpu_extension_bundle: Path,
     historical_cuda_bundle: Path,
+    runtime_inventory_out: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Verify the reviewed v2 scope and repeat every live prerequisite check.
 
@@ -139,6 +140,7 @@ def verify_source_preflight_authority(
             teacher_snapshot_root=teacher_snapshot_root,
             cpu_extension_bundle=cpu_extension_bundle,
             historical_cuda_bundle=historical_cuda_bundle,
+            runtime_inventory_out=runtime_inventory_out,
         )
     except CudaNullPreflightBlocked as exc:
         raise CudaNullSourcePreflightBlocked("fresh preflight readiness did not verify") from exc

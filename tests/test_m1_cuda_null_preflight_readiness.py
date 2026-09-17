@@ -83,6 +83,25 @@ def test_readiness_is_deterministic_and_never_authorizes_execution(
     )
 
 
+def test_readiness_exposes_single_verified_runtime_without_changing_record(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    inputs = _prepared_inputs(monkeypatch, tmp_path)
+    expected = readiness.verify_preflight_readiness(**inputs)
+    runtime_inventory: dict[str, object] = {}
+    observed = readiness.verify_preflight_readiness(
+        **inputs, runtime_inventory_out=runtime_inventory
+    )
+    assert observed == expected
+    assert runtime_inventory == {
+        "status": "RUNTIME_IDENTITY_VERIFIED_EXECUTION_BLOCKED",
+        "config_sha256": readiness.CONFIG_SHA256,
+        "onnx_graph_loaded": False,
+        "session_created": False,
+        "execution_authorized": False,
+    }
+
+
 def test_changed_spec_blocks_before_static_or_runtime(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -159,5 +178,7 @@ def test_runtime_must_report_no_session_and_no_execution(
             "execution_authorized": False,
         },
     )
+    runtime_inventory: dict[str, object] = {}
     with pytest.raises(readiness.CudaNullPreflightBlocked, match="runtime identity is incomplete"):
-        readiness.verify_preflight_readiness(**inputs)
+        readiness.verify_preflight_readiness(**inputs, runtime_inventory_out=runtime_inventory)
+    assert runtime_inventory == {}
