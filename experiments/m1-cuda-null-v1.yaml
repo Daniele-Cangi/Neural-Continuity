@@ -1,0 +1,136 @@
+experiment_name: M1_CUDA_SOURCE_MEASUREMENT_NULL_V1
+status: DRAFT_NOT_EXECUTABLE
+
+scope:
+  source_only: true
+  qualifying_evidence_captured: false
+  full_corpus_authorized: false
+  candidate_or_int8_execution_allowed: false
+  holdout_execution_allowed: false
+  stage_1_release_allowed: false
+  operational_tolerance_change_allowed: false
+  scientific_decision: NOT_EVALUATED
+
+dataset_authority:
+  dataset_id: nc-m1-beir-scifact-v1
+  materialization_manifest_sha256: 0746d98f5e69c6a0ee48ca3f47b342de1d968a877c90df26ffe8f893437fd5de
+  source_manifest_sha256: 58c246b89eb513069b0d088a5502a50d0e92173d612013d051a0ab0e423d979a
+  source_archive_sha256: 536e14446a0ba56ed1398ab1055f39fe852686ecad24a6306c80c490fa8e0165
+  materialization_policy_sha256: 445aa58c22faad40ee567d28c98115589cf5811acac9b30e7b7a48f383bf9037
+  partition_policy_sha256: 43eb7bd3a805792897de35cebd995d3d5b93931f08fca260f8a8d4aa1883457d
+  corpus_artifact_sha256: 58c378602a096373e00244657f12c693a5a02a333f893edb59d5349d699a524c
+  measurement_null_queries_sha256: 95ecf07c102b7df46095aeec10feae19725c8b5cbab9f1ea432b9a4c3782fddb
+  measurement_null_qrels_sha256: f41b57315a122b7fee557b94d198c44827676c6c59fdd08169fd46f4070cb3fc
+  document_count: 5183
+  measurement_null_query_count: 81
+  exact_role_order_and_artifact_hashes_required: true
+
+source_authority:
+  contract_path: contracts/m1-transition-b-v1.json
+  contract_sha256: 0acd1b0218b513ebbb6f9ab480f9305c746591b49a84577d09cb2e29c881c795
+  transition_a_manifest_sha256: 12566ccbcc7f3f74a799abca2189a9b0906efd44a0f038ce0dc7c44b7b87fc3a
+  teacher_manifest_sha256: c7a4548f10bcf8229c70d5fa7ef8676c7f9b7b03e5a1a515f2dad093f43ed724
+  onnx_fp32_artifact_sha256: 5c0d999bd6b5e64e36cad1f61a83ef8e7507d55be49086745780fabb7c648511
+  model_id: sentence-transformers/all-MiniLM-L6-v2
+  revision: 1110a243fdf4706b3f48f1d95db1a4f5529b4d41
+  tokenizer_snapshot_hashes_required: true
+  embedding_dtype: float32
+  embedding_dimension: 384
+  normalization: l2_unit_after_encode
+
+technical_preflight_record:
+  qualifying_detection_evidence: false
+  config_sha256: c050e99002558314b90a705360b9cc67ec45e1e6862e9703b3d0fea6cefd03d5
+  artifact_manifest_sha256: 276ba5286ffb38ddab1aa2e9101142fdde5e8eb20db6d0a534d33c272274e073
+  authority_sha256: 150ecc13c01d465ad2463faa8f155e8be1b26ad99fcde9d133e7ee83cc0edb5e
+  observed_materialization_manifest_sha256: beab716b9f322478ca3f2efd0e6e93e7d66a2b3483ed098941cd9f2275bcdcc2
+  dataset_identity_inherited: false
+  rebuilt_runtime_equivalence_verified: false
+  new_source_only_preflight_required: true
+
+provider_policy:
+  ordered_providers: [CUDAExecutionProvider, CPUExecutionProvider]
+  require_cuda_activity_per_run: true
+  classify_cpu_fallback_by_operator_type: true
+  reject_undeclared_providers: true
+  reject_unclassified_cpu_events: true
+  node_name_exceptions: false
+  tensor_name_exceptions: false
+  index_exceptions: false
+  benchmark_specific_exceptions: false
+
+runtime_identity:
+  gpu_name: NVIDIA GeForce RTX 2060
+  gpu_uuid: GPU-ae391850-862c-ae92-0bd8-5b68015c4cf5
+  compute_capability: "7.5"
+  driver_version: "581.57"
+  onnxruntime_gpu_version: 1.28.0
+  numpy_version: 2.3.3
+  sentence_transformers_version: 5.6.1
+  tokenizers_version: 0.22.0
+  torch_version: 2.10.0+cpu
+  transformers_version: 4.56.2
+  python_version: 3.12.10
+  nvidia_cuda_runtime_version: 13.4.49
+  nvidia_cuda_nvrtc_version: 13.4.59
+  nvidia_cublas_version: 13.7.0.27
+  nvidia_cufft_version: 12.4.0.34
+  nvidia_curand_version: 10.4.4.49
+  nvidia_nvjitlink_version: 13.4.52
+  nvidia_cudnn_cu13_version: 9.26.0.51
+  loaded_cuda_dll_sha256:
+    cudart64_13.dll: 05bfafcb97bd53b0089568a96e1e5bd6921637bd0853ff7f5342bd31a6a16890
+    cublas64_13.dll: 1119dbca0a808e0c8850bb4221e330daf0b5ddb348d62d37b6ac533854723df9
+    cublasLt64_13.dll: 0f5bc315fef706b5626248ebd74e8a48a9e82fa2f0cad38330f5f70984913107
+    cufft64_12.dll: 4599bb1399b1047084e8fb792fd1ab937ce28c5c09f562bd670cc66ee845cccb
+  loaded_cudnn_dll_sha256:
+    cudnn64_9.dll: 1a0728a6bd5c704bcdd1347cc6127fb6085fce773aaf9f1824281e9846c7b090
+    cudnn_adv64_9.dll: 235134b2f410569d3517da2df3cccc5bc8b3ed8466bb49c2503702598d2bf12a
+    cudnn_heuristic64_9.dll: 7ff562ba7530ff390575abd62794338565d397cd5627760bb94028e6d256012d
+    cudnn_engines_precompiled64_9.dll: c289ff5cab82e2be6a2ad116f966f4c655c94e11731e146bc3963d809eb46fc8
+    cudnn_graph64_9.dll: 8f98ea372de52da536559b538f84739b0f1c50ae7f32a07e7fd111f4938fb641
+    cudnn_ops64_9.dll: bf813ebb0a8c1e09dd95499ac701b5e45e3d066d5624b2716a289ed5a2ca1c28
+    cudnn_engines_runtime_compiled64_9.dll: 30a222f73ea8b89c216cc5384080addff3632a77ae6eed0d1eaa87fb57d9b184
+    cudnn_engines_tensor_ir64_9.dll: b97ef392f51923ee8dc616dca596fbc6f979281b135eb76991e8cadd43c6294f
+  installed_not_observed_loaded_dll_sha256:
+    nvrtc64_130_0.dll: bbc235709274cacd9e7d0fff4892d24ba4256c4bb2543288299d60454b6515f2
+    curand64_10.dll: 2e04701a9370e84eb60777e25d542e66d07086d452d5a5925f6a503468ffb208
+    nvJitLink_130_0.dll: 3cba760a61417bb376418b5216abe8afd5378fd638100bba0c16d868c4108346
+  onnxruntime_binary_sha256:
+    onnxruntime_providers_shared.dll: da6f94aebca695e8afb8beb18e9d797bce6a92837821f199ea207a4c6b75fa9d
+    onnxruntime_providers_cuda.dll: 0c61a2496e164000185b2b1f6a7de4b30b1f1c7d2ea2142e8f4143f5a8a2f395
+    onnxruntime_pybind11_state.pyd: f0a3e816a0197171b9845f561918c189c14d36cbcc19a25d92f8425d0d928293
+
+design:
+  sentinel:
+    process_epoch_count: 120
+    document_count: 256
+    selection_domain: neural-continuity:m1:null-extension:v1:document
+    qualifying_detection_evidence: false
+  full_corpus:
+    process_epoch_count: 120
+    document_count: 5183
+    qualifying_detection_evidence: true
+    start_authorized: false
+  query_role: measurement_null
+  query_count: 81
+  independent_process_per_epoch: true
+  early_stopping_allowed: false
+  adaptive_sample_size_allowed: false
+  epoch_layout:
+    - {label: batch_1_primary, batch_size: 1}
+    - {label: batch_16_primary, batch_size: 16}
+    - {label: batch_16_repeat, batch_size: 16}
+    - {label: batch_64_primary, batch_size: 64}
+  restart_pairs: adjacent_disjoint_1_2_through_119_120
+  target_percentile: 0.95
+  target_confidence: 0.95
+  ninety_ninth_percentile_claim_allowed: false
+  prediction_interval_language_allowed: false
+
+freeze_gate:
+  external_config_sha256: null
+  independent_review_complete: false
+  fail_closed_replay_verified: false
+  technical_runtime_restored: true
+  fresh_source_only_preflight_verified: false

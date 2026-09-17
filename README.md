@@ -282,6 +282,7 @@ It produces evidence-bounded continuity decisions. It does **not** certify unive
 | Runtime provenance | `INCONCLUSIVE` | The frozen batch-size envelope does not cover canonical baseline variation. |
 | Measurement-null extension | `SENTINEL COMPLETE` | The preregistered 120/120 sentinel is replay-verified; qualifying full-corpus execution has not started. |
 | Sentinel executor | `COMPLETE 120/120` | Checkpoints 1-120 are replay-verified; technical-only, non-qualifying, and full-corpus execution remains unavailable. |
+| CUDA null qualification | `DRAFT; NOT AUTHORIZED` | [Separate source-only protocol](docs/M1_CUDA_NULL_QUALIFICATION_PROTOCOL.md); no CUDA null epoch or full-corpus execution has started. |
 | Stage 1 | `NOT STARTED` | The fail-closed gate holds; Transition B remains `FAIL`. |
 
 Stage 0, runtime-provenance, and measurement-null-plan replay are model-free and verified. No threshold or frozen evidence was changed.
