@@ -42,3 +42,13 @@ authority, a protocol amendment, or permission to load an ONNX graph.
 
 Until these gates close, no CUDA sentinel, full-corpus epoch, INT8 run, holdout
 access, tolerance change, or scientific continuity decision is authorized.
+
+## Scratch placement for a future authorized run
+
+Use `D:\neural-continuity-evidence\cuda-scratch` for per-process scratch. Before
+starting the Python process, set `TMP`, `TEMP`, and `TMPDIR` to that directory;
+write evidence to a separate new directory on D:. A child Python process was
+observed resolving `tempfile.gettempdir()` to this scratch path. Do not change
+global Windows environment variables or delete existing evidence to prepare a
+run. Recheck free space at launch; native-library caches outside Python's
+`tempfile` are not yet proven to follow these variables.
