@@ -19,6 +19,11 @@ from neural_continuity.m1_diagnostics.cuda_null_authority import (
     CUDA_NULL_CONFIG_PATH,
     CUDA_NULL_CONFIG_SHA256,
 )
+from neural_continuity.m1_diagnostics.cuda_null_paths import has_linked_ancestor
+from neural_continuity.m1_diagnostics.cuda_null_runtime_preimport import (
+    import_verified_ort,
+    verify_ort_package,
+)
 
 FROZEN_ENVIRONMENT = Path(r"D:\neural-continuity-runtime-cuda-v1")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -112,12 +117,13 @@ def _mapping(value: Any, label: str) -> Mapping[str, Any]:
 def _file_from_distribution(distribution_name: str, basename: str, root: Path) -> Path:
     distribution = metadata.distribution(distribution_name)
     matches = [
-        Path(str(distribution.locate_file(item))).resolve()
+        Path(str(distribution.locate_file(item)))
         for item in distribution.files or ()
         if item.name.casefold() == basename.casefold()
     ]
     _require(len(matches) == 1, f"{distribution_name}: missing or duplicate {basename}")
-    path = matches[0]
+    _require(not has_linked_ancestor(matches[0]), f"{basename}: linked installed path")
+    path = matches[0].resolve()
     _require(
         path.is_file() and path.is_relative_to(root), f"{basename}: outside frozen environment"
     )
@@ -228,11 +234,7 @@ def _mapped_dll_paths(names: set[str]) -> dict[str, Path]:
     return {name: next(iter(paths)) for name, paths in found.items() if paths}
 
 
-def _dll_inventory(
-    root: Path, pins: Mapping[str, Any]
-) -> dict[str, dict[str, dict[str, str | bool]]]:
-    import onnxruntime as ort
-
+def _installed_dlls(root: Path, pins: Mapping[str, Any]) -> dict[str, tuple[str, Path, str]]:
     installed: dict[str, tuple[str, Path, str]] = {}
     for group, names in _DLL_GROUPS.items():
         expected_hashes = _mapping(pins[group], group)
@@ -241,8 +243,12 @@ def _dll_inventory(
             digest = sha256_file(installed_path)
             _require(digest == expected_hashes[name], f"{name}: installed hash mismatch")
             installed[name] = (distribution_name, installed_path, digest)
+    return installed
 
-    ort.preload_dlls(directory="")
+
+def _dll_inventory(
+    root: Path, installed: Mapping[str, tuple[str, Path, str]]
+) -> dict[str, dict[str, dict[str, str | bool]]]:
     mapped = _mapped_dll_paths(set(installed))
     observed: dict[str, dict[str, dict[str, str | bool]]] = {}
     for group, names in _DLL_GROUPS.items():
@@ -338,25 +344,30 @@ def verify_runtime_identity(config_path: Path, external_config_sha256: str) -> d
         pins = _load_runtime_pins(config_path, external_config_sha256)
         root = FROZEN_ENVIRONMENT.resolve()
         _require(Path(sys.prefix).resolve() == root, "wrong Python environment")
-        import onnxruntime as ort
-
-        observed: dict[str, Any] = {
-            "kind": "m1_cuda_null_runtime_identity",
-            "version": "1.0.0",
-            "status": "RUNTIME_IDENTITY_VERIFIED_EXECUTION_BLOCKED",
-            "config_sha256": external_config_sha256,
-            "environment_root": str(root),
-            "python_version": platform.python_version(),
-            "gpu": _gpu_inventory(),
-            "software": _distribution_inventory(root),
-            "dlls": _dll_inventory(root, pins),
-            "available_providers": ort.get_available_providers(),
-            "onnx_graph_loaded": False,
-            "session_created": False,
-            "execution_authorized": False,
-        }
-        _compare_runtime(pins, observed)
-        return observed
+        verify_ort_package(
+            root,
+            str(pins["onnxruntime_gpu_version"]),
+            _mapping(pins["onnxruntime_binary_sha256"], "ONNX Runtime binary pins"),
+        )
+        installed = _installed_dlls(root, pins)
+        with import_verified_ort(installed) as ort:
+            observed: dict[str, Any] = {
+                "kind": "m1_cuda_null_runtime_identity",
+                "version": "1.0.0",
+                "status": "RUNTIME_IDENTITY_VERIFIED_EXECUTION_BLOCKED",
+                "config_sha256": external_config_sha256,
+                "environment_root": str(root),
+                "python_version": platform.python_version(),
+                "gpu": _gpu_inventory(),
+                "software": _distribution_inventory(root),
+                "dlls": _dll_inventory(root, installed),
+                "available_providers": ort.get_available_providers(),
+                "onnx_graph_loaded": False,
+                "session_created": False,
+                "execution_authorized": False,
+            }
+            _compare_runtime(pins, observed)
+            return observed
     except CudaNullRuntimeBlocked:
         raise
     except Exception as exc:

@@ -153,6 +153,20 @@ def test_static_replay_rejects_reparse_package_parent(
         replay_static_package(run / "replay-bundle.json", result["manifest_sha256"])
 
 
+def test_declared_package_file_rejects_reparse_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from neural_continuity.m1_diagnostics import cuda_null_paths as paths_module
+
+    package = tmp_path / "package"
+    package.mkdir()
+    (package / "decision.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(paths_module, "_WINDOWS", True)
+    monkeypatch.setattr(paths_module, "_windows_reparse", lambda path: path == package)
+    with pytest.raises(CudaNullAuthorityBlocked, match="reparse point"):
+        authority_module._relative_file(package, "decision.json", "artifact")
+
+
 def test_static_config_rejects_resealed_scope_change(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -103,8 +103,8 @@ def _relative_file(root: Path, name: Any, label: str, *, allow_symlink: bool = F
         )
     else:
         _require(
-            not any(part.is_symlink() for part in (path, *path.parents) if part != root.parent),
-            f"{label}: symlink",
+            not has_linked_ancestor(path),
+            f"{label}: path contains a link or reparse point",
         )
         _require(path.resolve().is_relative_to(root.resolve()), f"{label}: path escapes package")
     return path
