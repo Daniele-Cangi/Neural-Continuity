@@ -25,6 +25,9 @@ def _inputs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, object
     }
     proposed.write_text(yaml.safe_dump(expected, sort_keys=True), encoding="utf-8")
     monkeypatch.setattr(authority, "AUTHORIZATION_SPEC_PATH", proposed)
+    monkeypatch.setattr(
+        authority, "AUTHORIZATION_SPEC_SHA256", hashlib.sha256(proposed.read_bytes()).hexdigest()
+    )
     monkeypatch.setattr(authority, "EXPECTED_AUTHORIZATION_SPEC", expected)
     readiness = {
         "status": "PREFLIGHT_PREREQUISITES_VERIFIED_NOT_AUTHORIZED",
@@ -61,6 +64,10 @@ def _inputs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, object
 def test_checked_in_authorization_scope_is_exact() -> None:
     proposed = yaml.safe_load(authority.AUTHORIZATION_SPEC_PATH.read_text(encoding="utf-8"))
     assert proposed == authority.EXPECTED_AUTHORIZATION_SPEC
+    assert (
+        hashlib.sha256(authority.AUTHORIZATION_SPEC_PATH.read_bytes()).hexdigest()
+        == authority.AUTHORIZATION_SPEC_SHA256
+    )
 
 
 def test_authority_requires_fresh_readiness_and_never_loads_a_graph(
@@ -98,6 +105,9 @@ def test_scope_change_fails_even_with_matching_external_hash(
     altered["scope"]["int8_allowed"] = True
     proposed.write_text(yaml.safe_dump(altered, sort_keys=True), encoding="utf-8")
     inputs["external_reviewed_spec_sha256"] = hashlib.sha256(proposed.read_bytes()).hexdigest()
+    monkeypatch.setattr(
+        authority, "AUTHORIZATION_SPEC_SHA256", inputs["external_reviewed_spec_sha256"]
+    )
     with pytest.raises(authority.CudaNullSourcePreflightBlocked, match="frozen source-only scope"):
         authority.verify_source_preflight_authority(**inputs)
 

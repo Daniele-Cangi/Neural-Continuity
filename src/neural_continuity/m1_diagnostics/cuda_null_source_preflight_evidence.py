@@ -18,6 +18,8 @@ import numpy as np
 from neural_continuity.evidence import canonical_json_bytes, sha256_file
 from neural_continuity.m1_diagnostics.cuda_null_paths import has_linked_ancestor
 from neural_continuity.m1_diagnostics.cuda_null_source_preflight_authority import (
+    AUTHORIZATION_SPEC_SHA256,
+    PREFLIGHT_SPEC_SHA256,
     READINESS_RECORD_SHA256,
     RUNTIME_IDENTITY_SHA256,
 )
@@ -105,19 +107,32 @@ def _verify_identity(identity: Mapping[str, Any]) -> None:
     authority = identity.get("source_preflight_authority")
     if not isinstance(authority, Mapping):
         raise ValueError("source-only preflight authority is missing")
-    digest = authority.get("record_sha256")
-    payload = {key: value for key, value in authority.items() if key != "record_sha256"}
+    expected_authority = {
+        "status": "SOURCE_ONLY_PREFLIGHT_AUTHORITY_VERIFIED",
+        "authorization_spec_sha256": AUTHORIZATION_SPEC_SHA256,
+        "parent_spec_sha256": PREFLIGHT_SPEC_SHA256,
+        "readiness_record_sha256": READINESS_RECORD_SHA256,
+        "runtime_identity_sha256": RUNTIME_IDENTITY_SHA256,
+        "source_only": True,
+        "document_count": DOCUMENT_COUNT,
+        "query_count": QUERY_COUNT,
+        "qualifying_m1_evidence": False,
+        "sentinel_allowed": False,
+        "full_corpus_allowed": False,
+        "int8_allowed": False,
+        "holdout_allowed": False,
+        "onnx_graph_loaded": False,
+        "session_created": False,
+        "technical_preflight_permission": "GRANTED_AFTER_REVIEW",
+    }
+    expected_digest = hashlib.sha256(canonical_json_bytes(expected_authority) + b"\n").hexdigest()
     if (
-        not isinstance(digest, str)
-        or hashlib.sha256(canonical_json_bytes(payload) + b"\n").hexdigest() != digest
-        or authority.get("status") != "SOURCE_ONLY_PREFLIGHT_AUTHORITY_VERIFIED"
-        or authority.get("readiness_record_sha256") != READINESS_RECORD_SHA256
-        or authority.get("runtime_identity_sha256") != RUNTIME_IDENTITY_SHA256
-        or authority.get("source_only") is not True
-        or authority.get("int8_allowed") is not False
-        or authority.get("full_corpus_allowed") is not False
-        or authority.get("holdout_allowed") is not False
-        or authority.get("technical_preflight_permission") != "GRANTED_AFTER_REVIEW"
+        set(authority) != set(expected_authority) | {"record_sha256"}
+        or any(
+            type(authority[key]) is not type(value) or authority[key] != value
+            for key, value in expected_authority.items()
+        )
+        or authority.get("record_sha256") != expected_digest
     ):
         raise ValueError("source-only preflight authority record is inconsistent")
 
@@ -251,6 +266,19 @@ def _decision(
     }
 
 
+def _external_output_directory(output_directory: Path) -> Path:
+    candidate = Path(output_directory).absolute()
+    if has_linked_ancestor(candidate.parent):
+        raise ValueError("output path contains a link or reparse point")
+    output = candidate.resolve(strict=False)
+    repository = Path(__file__).resolve().parents[3]
+    if output.is_relative_to(repository) or output.exists() or not output.parent.is_dir():
+        raise ValueError("output must be a new directory outside the repository")
+    if has_linked_ancestor(output.parent):
+        raise ValueError("output parent contains a link or reparse point")
+    return output
+
+
 def write_source_preflight_package(
     capture: Mapping[str, Any], output_directory: Path
 ) -> tuple[Path, str]:
@@ -260,12 +288,7 @@ def write_source_preflight_package(
     arrays = capture["observations"]
     profiles = capture["provider_profiles"]
     decision = _decision(runtime, identity, arrays, profiles)
-    output = Path(output_directory).absolute()
-    repository = Path(__file__).resolve().parents[3]
-    if output.is_relative_to(repository) or output.exists() or not output.parent.is_dir():
-        raise ValueError("output must be a new directory outside the repository")
-    if has_linked_ancestor(output.parent):
-        raise ValueError("output parent contains a link or reparse point")
+    output = _external_output_directory(output_directory)
     temporary = output.parent / f".{output.name}.tmp-{uuid.uuid4().hex}"
     temporary.mkdir()
     try:
@@ -385,6 +408,7 @@ def replay_source_preflight(bundle_path: Path, external_manifest_sha256: str) ->
         json.JSONDecodeError,
         zipfile.BadZipFile,
         EOFError,
+        OverflowError,
     ) as exc:
         return {
             "replay_status": "BLOCKED",

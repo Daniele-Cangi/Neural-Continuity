@@ -30,6 +30,7 @@ AUTHORIZATION_SPEC_PATH = (
     / "experiments"
     / "m1-cuda-null-source-preflight-authorization-v2.yaml"
 )
+AUTHORIZATION_SPEC_SHA256 = "5986cc2b0ed5ffeeab83d695bdc56840dae8caafd951af2217be6919c534c17a"
 READINESS_RECORD_SHA256 = "78c3ccc8dcc5cc62103c743cf69dde1b71f738b2a13793febf2918758ba990a3"
 RUNTIME_IDENTITY_SHA256 = "7df5acab2d9982362e83db0e34fcc926d22ff75efe832451e3073942b116e669"
 
@@ -113,6 +114,10 @@ def verify_source_preflight_authority(
         )
     except CudaNullPreflightBlocked as exc:
         raise CudaNullSourcePreflightBlocked(str(exc)) from exc
+    _require(
+        external_reviewed_spec_sha256 == AUTHORIZATION_SPEC_SHA256,
+        "reviewed specification SHA-256 differs from the frozen authorization",
+    )
     try:
         proposed = yaml.safe_load(authorization_spec.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, yaml.YAMLError) as exc:

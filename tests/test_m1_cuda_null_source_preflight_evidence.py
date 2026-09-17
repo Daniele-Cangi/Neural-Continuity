@@ -6,6 +6,7 @@ import hashlib
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from neural_continuity.evidence import canonical_json_bytes
 from neural_continuity.m1_diagnostics import cuda_null_source_preflight_evidence as evidence
@@ -23,12 +24,20 @@ def _capture(monkeypatch: object) -> dict[str, object]:
     monkeypatch.setattr(evidence, "RUNTIME_IDENTITY_SHA256", runtime_hash)
     authority = {
         "status": "SOURCE_ONLY_PREFLIGHT_AUTHORITY_VERIFIED",
+        "authorization_spec_sha256": evidence.AUTHORIZATION_SPEC_SHA256,
+        "parent_spec_sha256": evidence.PREFLIGHT_SPEC_SHA256,
         "readiness_record_sha256": evidence.READINESS_RECORD_SHA256,
         "runtime_identity_sha256": runtime_hash,
         "source_only": True,
+        "document_count": 64,
+        "query_count": 64,
+        "qualifying_m1_evidence": False,
+        "sentinel_allowed": False,
         "int8_allowed": False,
         "full_corpus_allowed": False,
         "holdout_allowed": False,
+        "onnx_graph_loaded": False,
+        "session_created": False,
         "technical_preflight_permission": "GRANTED_AFTER_REVIEW",
     }
     authority["record_sha256"] = hashlib.sha256(canonical_json_bytes(authority) + b"\n").hexdigest()
@@ -135,3 +144,72 @@ def test_each_run_needs_cuda_activity(monkeypatch: object) -> None:
         assert "CUDA provider activity" in str(exc)
     else:
         raise AssertionError("CPU-only run was accepted")
+
+
+@pytest.mark.parametrize(
+    ("field", "altered"),
+    [
+        ("authorization_spec_sha256", "0" * 64),
+        ("document_count", 65),
+        ("query_count", 65),
+        ("qualifying_m1_evidence", 0),
+        ("sentinel_allowed", True),
+        ("onnx_graph_loaded", True),
+        ("session_created", True),
+        ("unexpected_permission", True),
+    ],
+)
+def test_resealed_authority_mutation_blocks(
+    monkeypatch: object, field: str, altered: object
+) -> None:
+    capture = _capture(monkeypatch)
+    record = capture["input_identity"]["source_preflight_authority"]
+    record[field] = altered
+    payload = {key: value for key, value in record.items() if key != "record_sha256"}
+    record["record_sha256"] = hashlib.sha256(canonical_json_bytes(payload) + b"\n").hexdigest()
+    with pytest.raises(ValueError, match="authority record"):
+        evidence._decision(
+            capture["runtime_inventory"],
+            capture["input_identity"],
+            capture["observations"],
+            capture["provider_profiles"],
+        )
+
+
+def test_output_path_normalizes_before_repository_containment(tmp_path: Path) -> None:
+    repository = Path(evidence.__file__).resolve().parents[3]
+    disguised = (
+        repository.parent
+        / ".."
+        / repository.parent.name
+        / repository.name
+        / f".preflight-containment-{tmp_path.name}"
+    )
+    with pytest.raises(ValueError, match="outside the repository"):
+        evidence._external_output_directory(disguised)
+
+
+def test_resealed_oversized_profile_number_fails_closed(
+    monkeypatch: object, tmp_path: Path
+) -> None:
+    capture = _capture(monkeypatch)
+    output, _ = evidence.write_source_preflight_package(capture, tmp_path / "run")
+    profile_path = output / "provider-profile.jsonl"
+    profiles = [
+        evidence.json.loads(line) for line in profile_path.read_text(encoding="utf-8").splitlines()
+    ]
+    profiles[0]["encode_seconds"] = 10**1000
+    profile_path.write_bytes(
+        b"".join(canonical_json_bytes(profile) + b"\n" for profile in profiles)
+    )
+    manifest_path = output / "artifact-manifest.json"
+    manifest = evidence._read_json(manifest_path)
+    for entry in manifest["artifacts"]:
+        if entry["path"] == "provider-profile.jsonl":
+            entry["sha256"] = evidence.sha256_file(profile_path)
+    evidence._write_json(manifest_path, manifest)
+    replay = evidence.replay_source_preflight(
+        output / "replay-bundle.json", evidence.sha256_file(manifest_path)
+    )
+    assert replay["replay_status"] == "BLOCKED"
+    assert replay["technical_preflight_status"] == "BLOCKED"
