@@ -153,3 +153,18 @@ def test_mapped_inventory_includes_optional_names(
     assert runtime_module._mapped_dll_paths(
         {"curand64_10.dll", "onnxruntime_providers_cuda.dll"}
     ) == {"curand64_10.dll": mapped_file.resolve()}
+
+
+@pytest.mark.parametrize("delimiter", [",", ", ", ",   "])
+def test_gpu_inventory_accepts_csv_whitespace(
+    delimiter: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fields = ["GPU", "GPU-test", "581.57", "7.5"]
+    response = SimpleNamespace(stdout=delimiter.join(fields) + "\n")
+    monkeypatch.setattr(runtime_module.subprocess, "run", lambda *args, **kwargs: response)
+    assert runtime_module._gpu_inventory() == {
+        "gpu_name": "GPU",
+        "gpu_uuid": "GPU-test",
+        "driver_version": "581.57",
+        "compute_capability": "7.5",
+    }

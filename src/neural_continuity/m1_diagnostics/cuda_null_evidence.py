@@ -14,7 +14,9 @@ from neural_continuity.evidence import canonical_json_bytes, sha256_file
 from neural_continuity.m1_diagnostics.cuda_null_authority import (
     CORPUS_SHA256,
     CPU_EXTENSION_MANIFEST_SHA256,
+    CUDA_NULL_CONFIG_SHA256,
     DATASET_MANIFEST_SHA256,
+    DOCUMENT_IDS_SHA256,
     HISTORICAL_CUDA_MANIFEST_SHA256,
     MATERIALIZATION_POLICY_SHA256,
     MEASUREMENT_QRELS_SHA256,
@@ -22,12 +24,19 @@ from neural_continuity.m1_diagnostics.cuda_null_authority import (
     MODEL_ID,
     MODEL_REVISION,
     PARTITION_POLICY_SHA256,
+    QRELS_IDENTITY_SHA256,
+    QUERY_IDS_SHA256,
     ROLE_ORDER,
+    SNAPSHOT_DECLARATION_SHA256,
     TEACHER_MANIFEST_SHA256,
     TRANSITION_A_MANIFEST_SHA256,
     TRANSITION_A_ONNX_SHA256,
     TRANSITION_B_CONTRACT_SHA256,
     CudaNullAuthorityBlocked,
+)
+from neural_continuity.m1_diagnostics.cuda_null_paths import (
+    has_linked_ancestor,
+    path_is_link_or_reparse,
 )
 
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -108,7 +117,7 @@ def static_decision(authority: Mapping[str, Any]) -> dict[str, Any]:
     _require(
         authority.get("status") == "STATIC_VERIFIED_EXECUTION_BLOCKED", "authority status mismatch"
     )
-    _sha(authority.get("config_sha256"), "config")
+    _require(authority.get("config_sha256") == CUDA_NULL_CONFIG_SHA256, "config mismatch")
     _require(authority.get("contract_sha256") == TRANSITION_B_CONTRACT_SHA256, "contract mismatch")
     dataset = _object(authority.get("dataset"), "dataset")
     source = _object(authority.get("source"), "source")
@@ -141,6 +150,12 @@ def static_decision(authority: Mapping[str, Any]) -> dict[str, Any]:
         "measurement_qrels_sha256",
     ):
         _sha(dataset.get(key), f"dataset {key}")
+    for key, expected in (
+        ("document_ids_sha256", DOCUMENT_IDS_SHA256),
+        ("query_ids_sha256", QUERY_IDS_SHA256),
+        ("qrels_sha256", QRELS_IDENTITY_SHA256),
+    ):
+        _require(dataset.get(key) == expected, f"dataset {key} mismatch")
     _require(dataset["corpus_sha256"] == CORPUS_SHA256, "corpus artifact mismatch")
     _require(
         dataset["measurement_queries_sha256"] == MEASUREMENT_QUERIES_SHA256,
@@ -168,7 +183,10 @@ def static_decision(authority: Mapping[str, Any]) -> dict[str, Any]:
         and source.get("normalization") == "l2_unit_after_encode",
         "source semantics mismatch",
     )
-    _sha(source.get("snapshot_files_sha256"), "teacher snapshot")
+    _require(
+        source.get("snapshot_files_sha256") == SNAPSHOT_DECLARATION_SHA256,
+        "teacher snapshot declaration mismatch",
+    )
     _require(
         authority.get("historical_cpu_extension_manifest_sha256") == CPU_EXTENSION_MANIFEST_SHA256,
         "CPU extension provenance mismatch",
@@ -257,17 +275,11 @@ def replay_static_package(bundle_path: Path, external_manifest_sha256: str) -> d
             bundle_path.name == "replay-bundle.json",
             "replay bundle path mismatch",
         )
-        _require(
-            not any(
-                part.is_symlink() or getattr(part, "is_junction", lambda: False)()
-                for part in (bundle_path, *bundle_path.parents)
-            ),
-            "replay package path contains a symlink or junction",
-        )
+        _require(not has_linked_ancestor(bundle_path), "replay package path contains a link")
         root = bundle_path.parent.resolve()
         expected_manifest_sha256 = _sha(external_manifest_sha256, "external manifest")
         manifest_path = root / "artifact-manifest.json"
-        _require(not manifest_path.is_symlink(), "manifest symlink")
+        _require(not path_is_link_or_reparse(manifest_path), "manifest link")
         _require(
             sha256_file(manifest_path) == expected_manifest_sha256,
             "artifact manifest hash mismatch",
@@ -298,7 +310,8 @@ def replay_static_package(bundle_path: Path, external_manifest_sha256: str) -> d
             names.add(name)
             path = root / name
             _require(
-                path.is_file() and not path.is_symlink(), f"artifact missing or linked: {name}"
+                path.is_file() and not path_is_link_or_reparse(path),
+                f"artifact missing or linked: {name}",
             )
             _require(
                 type(item.get("size_bytes")) is int and path.stat().st_size == item["size_bytes"],

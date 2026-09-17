@@ -15,7 +15,9 @@ from neural_continuity.m1_diagnostics import (
 from neural_continuity.m1_diagnostics.cuda_null_authority import (
     CORPUS_SHA256,
     CPU_EXTENSION_MANIFEST_SHA256,
+    CUDA_NULL_CONFIG_SHA256,
     DATASET_MANIFEST_SHA256,
+    DOCUMENT_IDS_SHA256,
     HISTORICAL_CUDA_MANIFEST_SHA256,
     MATERIALIZATION_POLICY_SHA256,
     MEASUREMENT_QRELS_SHA256,
@@ -23,7 +25,10 @@ from neural_continuity.m1_diagnostics.cuda_null_authority import (
     MODEL_ID,
     MODEL_REVISION,
     PARTITION_POLICY_SHA256,
+    QRELS_IDENTITY_SHA256,
+    QUERY_IDS_SHA256,
     ROLE_ORDER,
+    SNAPSHOT_DECLARATION_SHA256,
     TEACHER_MANIFEST_SHA256,
     TRANSITION_A_MANIFEST_SHA256,
     TRANSITION_A_ONNX_SHA256,
@@ -41,12 +46,11 @@ from neural_continuity.m1_diagnostics.measurement_null_extension_authority impor
 
 
 def _authority() -> dict[str, object]:
-    digest = "a" * 64
     return {
         "kind": "m1_cuda_null_static_authority",
         "version": "1.0.0",
         "status": "STATIC_VERIFIED_EXECUTION_BLOCKED",
-        "config_sha256": digest,
+        "config_sha256": CUDA_NULL_CONFIG_SHA256,
         "contract_sha256": TRANSITION_B_CONTRACT_SHA256,
         "dataset": {
             "materialization_manifest_sha256": DATASET_MANIFEST_SHA256,
@@ -55,17 +59,9 @@ def _authority() -> dict[str, object]:
             "document_count": 5183,
             "measurement_query_count": 81,
             "measurement_qrel_count": 103,
-            **{
-                key: digest
-                for key in (
-                    "document_ids_sha256",
-                    "query_ids_sha256",
-                    "qrels_sha256",
-                    "corpus_sha256",
-                    "measurement_queries_sha256",
-                    "measurement_qrels_sha256",
-                )
-            },
+            "document_ids_sha256": DOCUMENT_IDS_SHA256,
+            "query_ids_sha256": QUERY_IDS_SHA256,
+            "qrels_sha256": QRELS_IDENTITY_SHA256,
             "corpus_sha256": CORPUS_SHA256,
             "measurement_queries_sha256": MEASUREMENT_QUERIES_SHA256,
             "measurement_qrels_sha256": MEASUREMENT_QRELS_SHA256,
@@ -79,7 +75,7 @@ def _authority() -> dict[str, object]:
             "model_revision": MODEL_REVISION,
             "embedding_dimension": 384,
             "normalization": "l2_unit_after_encode",
-            "snapshot_files_sha256": digest,
+            "snapshot_files_sha256": SNAPSHOT_DECLARATION_SHA256,
         },
         "historical_cpu_extension_manifest_sha256": CPU_EXTENSION_MANIFEST_SHA256,
         "historical_cuda_preflight_manifest_sha256": HISTORICAL_CUDA_MANIFEST_SHA256,
@@ -90,6 +86,23 @@ def _authority() -> dict[str, object]:
         "activation_read": False,
         "execution_authorized": False,
     }
+
+
+def _reseal_authority(run: Path, authority: dict[str, object]) -> str:
+    authority_path = run / "static-authority.json"
+    authority_path.write_bytes(canonical_json_bytes(authority) + b"\n")
+    bundle_path = run / "replay-bundle.json"
+    bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    bundle["authority_sha256"] = sha256_file(authority_path)
+    bundle_path.write_bytes(canonical_json_bytes(bundle) + b"\n")
+    manifest_path = run / "artifact-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for artifact in manifest["artifacts"]:
+        path = run / artifact["path"]
+        artifact["sha256"] = sha256_file(path)
+        artifact["size_bytes"] = path.stat().st_size
+    manifest_path.write_bytes(canonical_json_bytes(manifest) + b"\n")
+    return sha256_file(manifest_path)
 
 
 def test_static_package_replays_without_model(tmp_path: Path) -> None:
@@ -127,16 +140,17 @@ def test_static_replay_requires_external_manifest_hash(tmp_path: Path) -> None:
         replay_static_package(run / "replay-bundle.json", "b" * 64)
 
 
-def test_static_replay_rejects_symlinked_package_parent(tmp_path: Path) -> None:
+def test_static_replay_rejects_reparse_package_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from neural_continuity.m1_diagnostics import cuda_null_paths as paths_module
+
     run = tmp_path / "run"
     result = write_static_package(_authority(), run)
-    linked = tmp_path / "linked"
-    try:
-        linked.symlink_to(run, target_is_directory=True)
-    except (OSError, NotImplementedError):
-        pytest.skip("directory symlinks are unavailable")
-    with pytest.raises(CudaNullAuthorityBlocked, match="symlink or junction"):
-        replay_static_package(linked / "replay-bundle.json", result["manifest_sha256"])
+    monkeypatch.setattr(paths_module, "_WINDOWS", True)
+    monkeypatch.setattr(paths_module, "_windows_reparse", lambda path: path == run)
+    with pytest.raises(CudaNullAuthorityBlocked, match="contains a link"):
+        replay_static_package(run / "replay-bundle.json", result["manifest_sha256"])
 
 
 def test_static_config_rejects_resealed_scope_change(
@@ -172,12 +186,14 @@ def test_historical_replay_error_fails_closed(
     monkeypatch.setattr(authority_module, "_verify_source", lambda *_: {})
 
     def missing_cpu_plan(*_: object) -> None:
-        raise MeasurementNullPlanError("historical CPU package missing")
+        raise MeasurementNullPlanError("HISTORICAL_CPU_MISSING", "historical CPU package missing")
 
     monkeypatch.setattr(
         extension_evidence, "replay_measurement_null_extension_plan", missing_cpu_plan
     )
-    with pytest.raises(CudaNullAuthorityBlocked, match="static authority could not be verified"):
+    with pytest.raises(
+        CudaNullAuthorityBlocked, match="static authority could not be verified"
+    ) as failure:
         authority_module.build_static_authority(
             config_path=tmp_path / "m1-cuda-null-v1.yaml",
             external_config_sha256=authority_module.CUDA_NULL_CONFIG_SHA256,
@@ -187,6 +203,8 @@ def test_historical_replay_error_fails_closed(
             cpu_extension_bundle=tmp_path / "replay-bundle.json",
             historical_cuda_bundle=tmp_path / "replay-bundle.json",
         )
+    assert isinstance(failure.value.__cause__, MeasurementNullPlanError)
+    assert failure.value.__cause__.code == "HISTORICAL_CPU_MISSING"
 
 
 def test_static_package_cannot_claim_executable_state(tmp_path: Path) -> None:
@@ -237,17 +255,25 @@ def test_replay_rejects_missing_identity_even_if_hashes_are_resealed(
         del authority[field]
     else:
         del authority[section][field]
-    authority_path.write_bytes(canonical_json_bytes(authority) + b"\n")
-    bundle_path = run / "replay-bundle.json"
-    bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
-    bundle["authority_sha256"] = sha256_file(authority_path)
-    bundle_path.write_bytes(canonical_json_bytes(bundle) + b"\n")
-    manifest_path = run / "artifact-manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    for artifact in manifest["artifacts"]:
-        path = run / artifact["path"]
-        artifact["sha256"] = sha256_file(path)
-        artifact["size_bytes"] = path.stat().st_size
-    manifest_path.write_bytes(canonical_json_bytes(manifest) + b"\n")
     with pytest.raises(CudaNullAuthorityBlocked):
-        replay_static_package(bundle_path, sha256_file(manifest_path))
+        replay_static_package(run / "replay-bundle.json", _reseal_authority(run, authority))
+
+
+@pytest.mark.parametrize(
+    ("section", "field"),
+    [
+        ("root", "config_sha256"),
+        ("dataset", "document_ids_sha256"),
+        ("dataset", "query_ids_sha256"),
+        ("dataset", "qrels_sha256"),
+        ("source", "snapshot_files_sha256"),
+    ],
+)
+def test_replay_rejects_resealed_frozen_identity(tmp_path: Path, section: str, field: str) -> None:
+    run = tmp_path / "run"
+    write_static_package(_authority(), run)
+    authority = json.loads((run / "static-authority.json").read_text(encoding="utf-8"))
+    target = authority if section == "root" else authority[section]
+    target[field] = "b" * 64
+    with pytest.raises(CudaNullAuthorityBlocked):
+        replay_static_package(run / "replay-bundle.json", _reseal_authority(run, authority))

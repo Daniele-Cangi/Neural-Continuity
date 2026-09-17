@@ -17,6 +17,11 @@ from typing import Any
 import yaml
 
 from neural_continuity.evidence import canonical_json_bytes, sha256_file
+from neural_continuity.m1_diagnostics.cuda_null_paths import (
+    has_linked_ancestor,
+    path_is_link_or_reparse,
+    snapshot_file_inventory,
+)
 
 DATASET_MANIFEST_SHA256 = "0746d98f5e69c6a0ee48ca3f47b342de1d968a877c90df26ffe8f893437fd5de"
 PARTITION_POLICY_SHA256 = "43eb7bd3a805792897de35cebd995d3d5b93931f08fca260f8a8d4aa1883457d"
@@ -24,6 +29,10 @@ MATERIALIZATION_POLICY_SHA256 = "445aa58c22faad40ee567d28c98115589cf5811acac9b30
 CORPUS_SHA256 = "58c378602a096373e00244657f12c693a5a02a333f893edb59d5349d699a524c"
 MEASUREMENT_QUERIES_SHA256 = "95ecf07c102b7df46095aeec10feae19725c8b5cbab9f1ea432b9a4c3782fddb"
 MEASUREMENT_QRELS_SHA256 = "f41b57315a122b7fee557b94d198c44827676c6c59fdd08169fd46f4070cb3fc"
+DOCUMENT_IDS_SHA256 = "07590b0c35c31a15fda4883f8e9ebbcacf55ae74bd97d0bd95c743ee4191a2d7"
+QUERY_IDS_SHA256 = "9f399d92c337bb03f6d9cc11b50b980eb282e92dcd464be6542942ce8ed22f4a"
+QRELS_IDENTITY_SHA256 = "3acfb04a476865bbfb7c38b6ce18b431c61f813f5bccb7ac264e9082c04260c6"
+SNAPSHOT_DECLARATION_SHA256 = "42d8d798e4f01e68d9bb10634b9c712de00f7f8495271636fd6311b2db58e506"
 TRANSITION_A_MANIFEST_SHA256 = "12566ccbcc7f3f74a799abca2189a9b0906efd44a0f038ce0dc7c44b7b87fc3a"
 TRANSITION_A_ONNX_SHA256 = "5c0d999bd6b5e64e36cad1f61a83ef8e7507d55be49086745780fabb7c648511"
 TEACHER_MANIFEST_SHA256 = "c7a4548f10bcf8229c70d5fa7ef8676c7f9b7b03e5a1a515f2dad093f43ed724"
@@ -111,11 +120,13 @@ def _snapshot_target_is_allowed(snapshot_root: Path, declared_path: Path) -> boo
         or model_root.name != expected_model_dir
     ):
         return False
+    if not snapshot_root.is_dir() or has_linked_ancestor(snapshot_root):
+        return False
     target = declared_path.resolve()
     if target.is_relative_to(snapshot_root.resolve()):
         return True
     blobs = model_root / "blobs"
-    if not blobs.is_dir() or blobs.is_symlink():
+    if not blobs.is_dir() or path_is_link_or_reparse(blobs):
         return False
     blob_root = blobs.resolve()
     return blob_root.is_relative_to(model_root.resolve()) and target.parent == blob_root
@@ -388,6 +399,7 @@ def _verify_source(bundle_path: Path, snapshot_root: Path) -> dict[str, Any]:
             sha256_file(path) == _digest(record.get("sha256"), f"snapshot {name}"),
             f"snapshot hash mismatch: {name}",
         )
+    _require(snapshot_file_inventory(snapshot_root) == seen, "snapshot file inventory mismatch")
     return {
         "transition_a_manifest_sha256": TRANSITION_A_MANIFEST_SHA256,
         "onnx_sha256": TRANSITION_A_ONNX_SHA256,

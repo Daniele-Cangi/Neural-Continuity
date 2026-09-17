@@ -173,8 +173,12 @@ def _gpu_inventory() -> dict[str, str]:
         text=True,
         timeout=30,
     )
-    rows = [line.split(", ") for line in result.stdout.splitlines() if line.strip()]
-    _require(all(len(row) == 4 for row in rows), "GPU inventory format mismatch")
+    rows = [
+        [part.strip() for part in line.split(",")]
+        for line in result.stdout.splitlines()
+        if line.strip()
+    ]
+    _require(all(len(row) == 4 and all(row) for row in rows), "GPU inventory format mismatch")
     _require(len(rows) == 1, "expected exactly one frozen GPU")
     name, uuid, driver, capability = rows[0]
     return {
