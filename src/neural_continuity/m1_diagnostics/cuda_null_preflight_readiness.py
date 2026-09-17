@@ -79,8 +79,13 @@ def verify_preflight_readiness(
     teacher_snapshot_root: Path,
     cpu_extension_bundle: Path,
     historical_cuda_bundle: Path,
+    runtime_inventory_out: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Attest frozen prerequisites without granting any execution permission."""
+    _require(
+        runtime_inventory_out is None or not runtime_inventory_out,
+        "runtime inventory output must be empty",
+    )
     _require(
         external_preflight_spec_sha256 == PREFLIGHT_SPEC_SHA256,
         "external preflight specification hash mismatch",
@@ -160,7 +165,10 @@ def verify_preflight_readiness(
         "session_created": False,
         "execution_authorized": False,
     }
-    return {
+    result = {
         **record,
         "record_sha256": hashlib.sha256(canonical_json_bytes(record) + b"\n").hexdigest(),
     }
+    if runtime_inventory_out is not None:
+        runtime_inventory_out.update(runtime)
+    return result

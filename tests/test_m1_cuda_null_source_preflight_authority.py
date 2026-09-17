@@ -82,6 +82,28 @@ def test_authority_requires_fresh_readiness_and_never_loads_a_graph(
     assert record["int8_allowed"] is False
 
 
+def test_authority_forwards_verified_runtime_without_changing_record(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    inputs = _inputs(monkeypatch, tmp_path)
+    original = authority.verify_preflight_readiness
+    expected = authority.verify_source_preflight_authority(**inputs)
+
+    def readiness_with_runtime(**kwargs: object) -> dict[str, object]:
+        output = kwargs["runtime_inventory_out"]
+        assert isinstance(output, dict)
+        output["status"] = "RUNTIME_IDENTITY_VERIFIED_EXECUTION_BLOCKED"
+        return original(**kwargs)
+
+    monkeypatch.setattr(authority, "verify_preflight_readiness", readiness_with_runtime)
+    runtime_inventory: dict[str, object] = {}
+    observed = authority.verify_source_preflight_authority(
+        **inputs, runtime_inventory_out=runtime_inventory
+    )
+    assert observed == expected
+    assert runtime_inventory == {"status": "RUNTIME_IDENTITY_VERIFIED_EXECUTION_BLOCKED"}
+
+
 def test_changed_reviewed_spec_fails_before_readiness(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

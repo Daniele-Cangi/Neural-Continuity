@@ -16,9 +16,6 @@ from neural_continuity.m1_diagnostics.cuda_null_authority import (
     CudaNullAuthorityBlocked,
     _verify_source,
 )
-from neural_continuity.m1_diagnostics.cuda_null_runtime_authority import (
-    verify_runtime_identity,
-)
 from neural_continuity.m1_diagnostics.cuda_null_source_preflight_authority import (
     RUNTIME_IDENTITY_SHA256,
     CudaNullSourcePreflightBlocked,
@@ -67,6 +64,7 @@ def capture_source_preflight(
     working_directory: Path,
 ) -> dict[str, Any]:
     """Verify every authority before importing a teacher or creating a session."""
+    runtime: dict[str, Any] = {}
     authority = verify_source_preflight_authority(
         authorization_spec=authorization_spec,
         external_reviewed_spec_sha256=external_reviewed_spec_sha256,
@@ -81,6 +79,7 @@ def capture_source_preflight(
         teacher_snapshot_root=teacher_snapshot_root,
         cpu_extension_bundle=cpu_extension_bundle,
         historical_cuda_bundle=historical_cuda_bundle,
+        runtime_inventory_out=runtime,
     )
     if (
         authority.get("status") != "SOURCE_ONLY_PREFLIGHT_AUTHORITY_VERIFIED"
@@ -95,7 +94,6 @@ def capture_source_preflight(
         )
     except (OSError, ValueError) as exc:
         raise CudaNullSourcePreflightBlocked("frozen source inputs did not verify") from exc
-    runtime = verify_runtime_identity(config_path, external_config_sha256)
     runtime_hash = hashlib.sha256(canonical_json_bytes(runtime) + b"\n").hexdigest()
     if runtime_hash != RUNTIME_IDENTITY_SHA256:
         raise ValueError("runtime identity changed after pre-execution authority")
