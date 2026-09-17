@@ -17,6 +17,7 @@ from neural_continuity.m1_diagnostics.cuda_null_source_preflight_evidence import
     write_source_preflight_package,
 )
 from neural_continuity.m1_diagnostics.cuda_preflight_authority import CudaPreflightBlocked
+from neural_continuity.m1_teacher_evidence import TeacherEvidenceError
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -81,6 +82,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (CudaNullSourcePreflightBlocked, CudaNullRuntimeBlocked, CudaPreflightBlocked) as exc:
         print(json.dumps({"status": "BLOCKED", "reason": str(exc)}, sort_keys=True))
         return 2
+    except TeacherEvidenceError as exc:
+        status = "BLOCKED" if exc.status == "BLOCKED" else "EXECUTION_ERROR"
+        print(json.dumps({"status": status, "reason": str(exc)}, sort_keys=True))
+        return 2 if status == "BLOCKED" else 3
     except Exception as exc:
         print(
             json.dumps(

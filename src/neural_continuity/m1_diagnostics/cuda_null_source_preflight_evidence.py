@@ -16,7 +16,10 @@ from typing import Any
 import numpy as np
 
 from neural_continuity.evidence import canonical_json_bytes, sha256_file
-from neural_continuity.m1_diagnostics.cuda_null_paths import has_linked_ancestor
+from neural_continuity.m1_diagnostics.cuda_null_paths import (
+    has_linked_ancestor,
+    path_is_link_or_reparse,
+)
 from neural_continuity.m1_diagnostics.cuda_null_source_preflight_authority import (
     AUTHORIZATION_SPEC_SHA256,
     PREFLIGHT_SPEC_SHA256,
@@ -268,7 +271,11 @@ def _decision(
 
 def _external_output_directory(output_directory: Path) -> Path:
     candidate = Path(output_directory).absolute()
-    if has_linked_ancestor(candidate.parent):
+    try:
+        linked_output = path_is_link_or_reparse(candidate)
+    except FileNotFoundError:
+        linked_output = False
+    if linked_output or has_linked_ancestor(candidate.parent):
         raise ValueError("output path contains a link or reparse point")
     output = candidate.resolve(strict=False)
     repository = Path(__file__).resolve().parents[3]

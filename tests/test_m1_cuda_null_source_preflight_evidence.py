@@ -189,6 +189,29 @@ def test_output_path_normalizes_before_repository_containment(tmp_path: Path) ->
         evidence._external_output_directory(disguised)
 
 
+def test_linked_final_output_path_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output = tmp_path / "run"
+    monkeypatch.setattr(evidence, "path_is_link_or_reparse", lambda path: path == output)
+    with pytest.raises(ValueError, match="link or reparse point"):
+        evidence._external_output_directory(output)
+
+
+def test_missing_final_output_path_remains_valid(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output = tmp_path / "run"
+
+    def missing_final_path(path: Path) -> bool:
+        if path == output:
+            raise FileNotFoundError(path)
+        return False
+
+    monkeypatch.setattr(evidence, "path_is_link_or_reparse", missing_final_path)
+    assert evidence._external_output_directory(output) == output
+
+
 def test_linked_artifact_manifest_fails_closed(monkeypatch: object, tmp_path: Path) -> None:
     capture = _capture(monkeypatch)
     output, manifest_hash = evidence.write_source_preflight_package(capture, tmp_path / "run")

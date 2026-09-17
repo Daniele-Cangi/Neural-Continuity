@@ -14,6 +14,7 @@ from neural_continuity.m1_diagnostics.cuda_null_source_preflight_authority impor
     CudaNullSourcePreflightBlocked,
 )
 from neural_continuity.m1_diagnostics.cuda_preflight_authority import CudaPreflightBlocked
+from neural_continuity.m1_teacher_evidence import TeacherEvidenceError
 
 
 def _capture_args(root: Path) -> list[str]:
@@ -90,6 +91,28 @@ def test_capture_unexpected_failure_remains_execution_error(
     monkeypatch.setattr(runtime, "capture_source_preflight", failed)
     assert cli.main(_capture_args(tmp_path)) == 3
     assert json.loads(capsys.readouterr().out)["status"] == "EXECUTION_ERROR"
+
+
+@pytest.mark.parametrize(
+    ("teacher_status", "expected_status", "exit_code"),
+    [("BLOCKED", "BLOCKED", 2), ("EXECUTION_ERROR", "EXECUTION_ERROR", 3)],
+)
+def test_capture_teacher_evidence_error_preserves_status(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    teacher_status: str,
+    expected_status: str,
+    exit_code: int,
+) -> None:
+    def failed(**_kwargs: object) -> None:
+        raise TeacherEvidenceError("TEACHER_INPUT_INVALID", "frozen input mismatch", teacher_status)
+
+    monkeypatch.setattr(runtime, "capture_source_preflight", failed)
+    assert cli.main(_capture_args(tmp_path)) == exit_code
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == expected_status
+    assert "frozen input mismatch" in result["reason"]
 
 
 def test_capture_success_reports_model_free_replay(
