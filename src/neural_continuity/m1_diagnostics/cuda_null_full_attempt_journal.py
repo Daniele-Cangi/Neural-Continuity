@@ -130,15 +130,22 @@ def _reduce(record: dict[str, Any], state: dict[str, Any]) -> None:
         state["open_attempt"] = None
 
 
-def _read_chain(root: Path, authority_sha256: str) -> tuple[list[dict[str, Any]], str, dict[str, Any]]:
+def _read_chain(
+    root: Path, authority_sha256: str
+) -> tuple[list[dict[str, Any]], str, dict[str, Any]]:
     _digest(authority_sha256, "authority")
     _root_check(root)
     state = _new_state()
     if not root.exists():
         return [], authority_sha256, state
     entries = sorted(root.iterdir(), key=lambda item: item.name)
-    _require(all(entry.is_file() and not entry.is_symlink() for entry in entries), "invalid journal entry")
-    _require(all(_CHECKPOINT.fullmatch(entry.name) for entry in entries), "unexpected journal entry")
+    _require(
+        all(entry.is_file() and not entry.is_symlink() for entry in entries),
+        "invalid journal entry",
+    )
+    _require(
+        all(_CHECKPOINT.fullmatch(entry.name) for entry in entries), "unexpected journal entry"
+    )
     records: list[dict[str, Any]] = []
     previous = authority_sha256
     for sequence, path in enumerate(entries, start=1):
