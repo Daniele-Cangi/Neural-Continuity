@@ -82,7 +82,8 @@ def _new_state() -> dict[str, Any]:
 
 def _reduce(record: dict[str, Any], state: dict[str, Any]) -> None:
     kind = record.get("kind")
-    _require(kind in _EXTRA_FIELDS, "unknown journal event")
+    if not isinstance(kind, str) or kind not in _EXTRA_FIELDS:
+        raise FullCorpusJournalBlocked("unknown journal event")
     _require(set(record) == _BASE_FIELDS | _EXTRA_FIELDS[kind], "journal field set differs")
     _require(record["version"] == _VERSION, "journal version differs")
     _require(
@@ -226,12 +227,15 @@ def append_attempt_event(
             package_verifier=package_verifier,
         )
         if event.get("kind") == "epoch_completed":
-            _require(package_verifier is not None, "epoch completion requires package replay")
+            verifier = package_verifier
+            if verifier is None:
+                raise FullCorpusJournalBlocked("epoch completion requires package replay")
             epoch = event.get("epoch")
             manifest = event.get("package_manifest_sha256")
-            _require(type(epoch) is int and isinstance(manifest, str), "completion fields invalid")
+            if type(epoch) is not int or not isinstance(manifest, str):
+                raise FullCorpusJournalBlocked("completion fields invalid")
             _digest(manifest, "epoch package manifest")
-            _require(package_verifier(epoch, manifest) is True, "new epoch package replay blocked")
+            _require(verifier(epoch, manifest) is True, "new epoch package replay blocked")
         record = {
             **event,
             "version": _VERSION,
