@@ -22,6 +22,8 @@ jobs:
           python-version: "3.12"
       - name: Install CPU-only PyTorch
         run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install NumPy compatible with the Python 3.11 mypy target
+        run: python -m pip install "numpy>=1.26,<2.3"
       - name: Install repository and validation dependencies
         run: python -m pip install -e ".[test,dev,onnx,sentence-transformers]"
       - name: Pytest
