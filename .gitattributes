@@ -4,3 +4,5 @@
 /docs/M1_CUDA_NULL_QUALIFICATION_PROTOCOL.md text eol=lf
 /experiments/m1-cuda-null-sentinel-authority-v2.json text eol=lf
 /experiments/m1-cuda-null-full-corpus-proposal-v1.json text eol=lf
+/experiments/m1-cuda-full-corpus-budget-preflight-v1.json text eol=lf
+/experiments/m1-cuda-full-corpus-budget-preflight-v2.json text eol=lf

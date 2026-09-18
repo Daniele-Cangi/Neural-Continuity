@@ -6,7 +6,12 @@
   "sentinel_authority_sha256": "987e038164916549e9bda3f1ce362c7f8b6490ab45875b73c4228863621259eb",
   "sentinel_final_checkpoint_sha256": "ded69e251d15dd6360deeeaaf970435ddb6b1e004086ea30274b53766fbc48ca",
   "required_sentinel_gate_status": "TECHNICAL_GATE_PASS_NO_SCIENTIFIC_RELEASE",
-  "required_gate_manifest_sha256": null,
+  "required_gate_manifest_sha256": "331411a9523690afaf0e56678141e4b2358151fa817e91b6366d811edd12a1b3",
+  "budget_preflight_manifest_sha256": "93aa797cebad75892bc4771ef24d5c4893978d8fc1f4cab45c40fddbb897ef6a",
+  "budget_preflight_spec_sha256": "5ecd713388e1947c0aa88c45ae67e62c0792f4783f21b0e9b75ad0b3736dc60c",
+  "budget_linear_projection_hours": 13.382757793332955,
+  "budget_projection_is_upper_bound": false,
+  "planned_raw_observation_bytes": 3881041920,
   "parent_config_sha256": "df1a171d93e7fa07909e3f24b552baccd592a7239c5e6a5c4e3f972c475551d3",
   "protocol_sha256": "eb3db027c73d989349bf3a11a8c734a7c4c175701f214acb288e39247676c7d3",
   "source_onnx_sha256": "5c0d999bd6b5e64e36cad1f61a83ef8e7507d55be49086745780fabb7c648511",
@@ -27,8 +32,8 @@
   "execution_authorized": false,
   "scientific_decision": "NOT_EVALUATED",
   "activation_requirements": [
-    "Pin and replay the completed technical-gate artifact manifest externally.",
-    "Resolve the frozen protocol's independent pre-execution review condition explicitly in a new version; do not mark an owner waiver as independent review.",
+    "Replay the pinned technical-gate and budget-preflight manifests before executor activation.",
+    "Obtain genuinely independent pre-execution review; owner approval is not a substitute.",
     "Freeze storage and runtime budgets, full-corpus epoch format, fail-closed replay, and executable authority in a separate version before any ONNX session."
   ]
 }
