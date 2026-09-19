@@ -10,3 +10,5 @@
 /experiments/m1-cuda-full-profile-storage-probe-v1.json text eol=lf
 /experiments/m1-cuda-full-profile-storage-probe-result-v1.json text eol=lf
 /experiments/m1-cuda-full-profile-compression-result-v1.json text eol=lf
+/experiments/m1-cuda-null-full-corpus-authority-v1.json text eol=lf
+/docs/M1_CUDA_FULL_CORPUS_PRE_EXECUTION_REVIEW.md text eol=lf

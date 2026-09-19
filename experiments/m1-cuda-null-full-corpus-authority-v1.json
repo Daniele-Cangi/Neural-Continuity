@@ -1,9 +1,10 @@
 {
   "kind": "m1_cuda_null_full_corpus_execution_authority",
   "version": "1.0.0",
-  "status": "EXECUTION_AUTHORIZED_PENDING_LIVE_REVERIFICATION",
-  "authorization_basis": "The repository owner authorized implementation and execution after the independently produced PRE_EXECUTION_REVIEW_PASS. Every pinned prerequisite must replay before graph loading.",
-  "independent_review_completed": true,
+  "status": "IMPLEMENTATION_REVIEW_REQUIRED_EXECUTION_BLOCKED",
+  "authorization_basis": "The independently produced PRE_EXECUTION_REVIEW_PASS covered the frozen design at commit 4032d07, not the subsequent executor implementation. Execution remains blocked pending a separate independent implementation review and live prerequisite replay.",
+  "design_pre_execution_review_completed": true,
+  "implementation_independent_review_completed": false,
   "proposal_sha256": "4e78cd0497becbde1c974369c6fbac82cda190cffae006c2e1892790a161859c",
   "execution_plan_sha256": "20cc3ec5f7bcd086681b97197c2f1ae8d730f4e4d32f1ee32c2324d789bc5fac",
   "review_sha256": "956f47b0e0c9c7ab9213e42c0bdfe3f650fe6f0b13805248e59813b03d372cd3",
@@ -30,7 +31,7 @@
   "candidate_or_int8_execution_allowed": false,
   "holdout_access_allowed": false,
   "operational_tolerance_change_allowed": false,
-  "execution_authorized": true,
+  "execution_authorized": false,
   "scientific_decision": "NOT_EVALUATED",
   "paths": {
     "technical_gate_bundle": "D:\\neural-continuity-evidence\\nc-m1-cuda-sentinel-technical-gate-20260918\\replay-bundle.json",

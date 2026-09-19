@@ -67,7 +67,10 @@ def _capture_profiled_role(
     observation_path = staging / "observations" / run_label / f"{role}.npy"
     profile_directory = staging / "profiles" / run_label / role
     _require(
-        not observation_path.exists() and not profile_directory.exists(),
+        not has_linked_ancestor(observation_path)
+        and not has_linked_ancestor(profile_directory)
+        and not observation_path.exists()
+        and not profile_directory.exists(),
         "capture output already exists",
     )
     observation_path.parent.mkdir(parents=True, exist_ok=True)

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import uuid
+import hashlib
 
 import pytest
 
+from neural_continuity.evidence import canonical_json_bytes
+from neural_continuity.m1_diagnostics import cuda_null_full_epoch_format as epoch_format
 from neural_continuity.m1_diagnostics.cuda_null_full_epoch_format import (
     DATASET_MANIFEST_SHA256,
     DOCUMENT_COUNT,
@@ -46,6 +49,26 @@ def _plan(epoch: int = 1) -> dict[str, object]:
     }
 
 
+@pytest.fixture(autouse=True)
+def _bind_synthetic_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
+    plan = _plan()
+    monkeypatch.setattr(
+        epoch_format,
+        "DOCUMENT_IDS_SHA256",
+        hashlib.sha256(canonical_json_bytes(plan["document_ids"])).hexdigest(),
+    )
+    monkeypatch.setattr(
+        epoch_format,
+        "QUERY_IDS_SHA256",
+        hashlib.sha256(canonical_json_bytes(plan["query_ids"])).hexdigest(),
+    )
+    monkeypatch.setattr(
+        epoch_format,
+        "QRELS_IDENTITY_SHA256",
+        hashlib.sha256(canonical_json_bytes(plan["qrels"])).hexdigest(),
+    )
+
+
 def test_full_epoch_plan_accepts_only_frozen_scope() -> None:
     validate_full_epoch_plan(_plan(), AUTHORITY)
     plan = _plan()
@@ -65,6 +88,14 @@ def test_full_epoch_plan_fails_closed_on_missing_qrel() -> None:
     plan = _plan()
     plan["qrels"].pop("q080")
     with pytest.raises(FullEpochFormatBlocked, match="qrels query order differs"):
+        validate_full_epoch_plan(plan, AUTHORITY)
+
+
+def test_full_epoch_plan_rejects_same_size_substituted_population() -> None:
+    plan = _plan()
+    plan["document_ids"][0] = "substituted-document"
+    plan["qrels"]["q000"] = ["substituted-document"]
+    with pytest.raises(FullEpochFormatBlocked, match="frozen materialization"):
         validate_full_epoch_plan(plan, AUTHORITY)
 
 

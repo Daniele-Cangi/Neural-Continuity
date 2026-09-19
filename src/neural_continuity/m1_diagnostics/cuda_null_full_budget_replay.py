@@ -18,6 +18,7 @@ from neural_continuity.m1_diagnostics.cuda_null_full_budget_authority import (
     SOURCE_ONNX_SHA256,
     load_budget_spec,
 )
+from neural_continuity.m1_diagnostics.cuda_null_paths import has_linked_ancestor
 from neural_continuity.m1_diagnostics.cuda_null_sentinel_execution_authority import (
     _load_spec,
 )
@@ -186,7 +187,11 @@ def validate_budget_record(record: dict[str, Any]) -> None:
 def replay_budget_package(bundle: Path, external_manifest_sha256: str) -> dict[str, Any]:
     try:
         bundle = Path(bundle).absolute()
-        if bundle.name != FILES[1] or {p.name for p in bundle.parent.iterdir()} != set(FILES):
+        if (
+            bundle.name != FILES[1]
+            or has_linked_ancestor(bundle)
+            or {p.name for p in bundle.parent.iterdir()} != set(FILES)
+        ):
             raise ValueError("budget artifact set differs")
         manifest = bundle.parent / FILES[2]
         if sha256_file(manifest) != external_manifest_sha256:

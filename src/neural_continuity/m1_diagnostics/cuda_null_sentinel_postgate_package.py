@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from neural_continuity.evidence import canonical_json_bytes, sha256_file
+from neural_continuity.m1_diagnostics.cuda_null_paths import has_linked_ancestor
 from neural_continuity.m1_diagnostics.cuda_null_sentinel_postgate import (
     SHA256,
     build_sentinel_postgate_report,
@@ -46,8 +47,10 @@ def replay_sentinel_postgate(bundle: Path, external_manifest_sha256: str) -> dic
         if SHA256.fullmatch(external_manifest_sha256) is None:
             raise ValueError("external gate manifest hash is invalid")
         bundle = Path(bundle).absolute()
-        if bundle.name != "replay-bundle.json" or {p.name for p in bundle.parent.iterdir()} != set(
-            FILES
+        if (
+            bundle.name != "replay-bundle.json"
+            or has_linked_ancestor(bundle)
+            or {p.name for p in bundle.parent.iterdir()} != set(FILES)
         ):
             raise ValueError("gate artifact set differs")
         manifest = bundle.parent / "artifact-manifest.json"

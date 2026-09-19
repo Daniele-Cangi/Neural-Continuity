@@ -15,6 +15,7 @@ from neural_continuity.m1_diagnostics.cuda_null_full_budget_replay import (
 from neural_continuity.m1_diagnostics.cuda_null_full_profile_compression_package import (
     replay_compressed_profile_package,
 )
+from neural_continuity.m1_diagnostics.cuda_null_paths import has_linked_ancestor
 from neural_continuity.m1_diagnostics.cuda_null_preflight_readiness import (
     CONFIG_PATH,
     CONFIG_SHA256,
@@ -25,6 +26,9 @@ from neural_continuity.m1_diagnostics.cuda_null_preflight_readiness import (
 from neural_continuity.m1_diagnostics.cuda_null_sentinel_execution_authority import (
     SentinelExecutionAuthority,
     verify_sentinel_execution_authority,
+)
+from neural_continuity.m1_diagnostics.cuda_null_sentinel_postgate_package import (
+    replay_sentinel_postgate,
 )
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -81,8 +85,9 @@ def _read_spec(external_sha256: str) -> dict[str, Any]:
     expected: dict[str, Any] = {
         "kind": "m1_cuda_null_full_corpus_execution_authority",
         "version": "1.0.0",
-        "status": "EXECUTION_AUTHORIZED_PENDING_LIVE_REVERIFICATION",
-        "independent_review_completed": True,
+        "status": "IMPLEMENTATION_REVIEW_REQUIRED_EXECUTION_BLOCKED",
+        "design_pre_execution_review_completed": True,
+        "implementation_independent_review_completed": False,
         "proposal_sha256": PROPOSAL_SHA256,
         "execution_plan_sha256": PLAN_SHA256,
         "review_sha256": REVIEW_SHA256,
@@ -109,7 +114,7 @@ def _read_spec(external_sha256: str) -> dict[str, Any]:
         "candidate_or_int8_execution_allowed": False,
         "holdout_access_allowed": False,
         "operational_tolerance_change_allowed": False,
-        "execution_authorized": True,
+        "execution_authorized": False,
         "scientific_decision": "NOT_EVALUATED",
     }
     _require(
@@ -160,7 +165,26 @@ def verify_full_corpus_execution_authority(
     ):
         _pinned_file(path, path, digest, label)
 
+    _require(
+        not any(has_linked_ancestor(path.absolute()) for path in paths.values()),
+        "declared execution path contains a link or reparse point",
+    )
+    _require(
+        spec["implementation_independent_review_completed"] is True
+        and spec["execution_authorized"] is True,
+        "independent implementation review is required before execution",
+    )
+
     sentinel = verify_sentinel_execution_authority(SENTINEL_AUTHORITY_SHA256)
+    gate = replay_sentinel_postgate(paths["technical_gate_bundle"], GATE_MANIFEST_SHA256)
+    _require(
+        gate.get("replay_status") == "PASS"
+        and gate.get("status") == "TECHNICAL_GATE_PASS_NO_SCIENTIFIC_RELEASE"
+        and gate.get("epoch_count") == 120
+        and gate.get("model_loaded") is False
+        and gate.get("full_corpus_execution_authorized") is False,
+        "declared sentinel technical gate replay blocked",
+    )
     budget = replay_budget_package(paths["budget_preflight_bundle"], BUDGET_MANIFEST_SHA256)
     _require(
         budget.get("replay_status") == "PASS"

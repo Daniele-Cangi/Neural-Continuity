@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import uuid
 from collections.abc import Mapping
 from typing import Any
+
+from neural_continuity.evidence import canonical_json_bytes
 
 FORMAT_VERSION = "1.0.0"
 EPOCH_COUNT = 120
@@ -14,6 +17,9 @@ QUERY_COUNT = 81
 EMBEDDING_DIMENSION = 384
 DATASET_MANIFEST_SHA256 = "0746d98f5e69c6a0ee48ca3f47b342de1d968a877c90df26ffe8f893437fd5de"
 SOURCE_ONNX_SHA256 = "5c0d999bd6b5e64e36cad1f61a83ef8e7507d55be49086745780fabb7c648511"
+DOCUMENT_IDS_SHA256 = "07590b0c35c31a15fda4883f8e9ebbcacf55ae74bd97d0bd95c743ee4191a2d7"
+QUERY_IDS_SHA256 = "9f399d92c337bb03f6d9cc11b50b980eb282e92dcd464be6542942ce8ed22f4a"
+QRELS_IDENTITY_SHA256 = "3acfb04a476865bbfb7c38b6ce18b431c61f813f5bccb7ac264e9082c04260c6"
 RUN_LAYOUT = (
     ("batch_1_primary", 1),
     ("batch_16_primary", 16),
@@ -124,6 +130,14 @@ def validate_full_epoch_plan(plan: Mapping[str, Any], external_authority_sha256:
             and all(isinstance(item, str) and item in document_set for item in relevant),
             f"qrels differ for query: {query_id}",
         )
+    identities = (
+        (documents, DOCUMENT_IDS_SHA256, "document identities"),
+        (queries, QUERY_IDS_SHA256, "query identities"),
+        (qrels, QRELS_IDENTITY_SHA256, "qrels identities"),
+    )
+    for value, expected_sha256, label in identities:
+        observed = hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+        _require(observed == expected_sha256, f"{label} differ from frozen materialization")
 
 
 def validate_full_epoch_runtime(runtime: Mapping[str, Any]) -> None:

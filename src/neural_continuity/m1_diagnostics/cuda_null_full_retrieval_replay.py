@@ -11,6 +11,12 @@ from typing import Any
 
 import numpy as np
 
+from neural_continuity.evidence import canonical_json_bytes
+from neural_continuity.m1_diagnostics.cuda_null_full_epoch_format import (
+    DOCUMENT_IDS_SHA256,
+    QRELS_IDENTITY_SHA256,
+    QUERY_IDS_SHA256,
+)
 from neural_continuity.m1_diagnostics.cuda_null_full_raw_replay import replay_full_raw_run
 
 _TOP_K = 10
@@ -51,6 +57,14 @@ def _validate_inputs(
             and all(isinstance(item, str) and item in available for item in relevant),
             f"measurement-null qrels invalid: {query_id}",
         )
+    identities = (
+        (list(document_ids), DOCUMENT_IDS_SHA256, "document identities"),
+        (list(query_ids), QUERY_IDS_SHA256, "query identities"),
+        ({key: list(qrels[key]) for key in query_ids}, QRELS_IDENTITY_SHA256, "qrels identities"),
+    )
+    for value, expected_sha256, label in identities:
+        observed = hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+        _require(observed == expected_sha256, f"{label} differ from frozen materialization")
 
 
 def _load_pinned_array(path: Path, expected_sha256: str, row_count: int) -> np.ndarray:
