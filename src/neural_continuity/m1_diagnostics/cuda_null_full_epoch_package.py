@@ -6,7 +6,7 @@ import json
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from neural_continuity.evidence import sha256_file
+from neural_continuity.evidence import canonical_json_bytes, sha256_file
 from neural_continuity.m1_diagnostics.cuda_null_full_comparison_replay import (
     replay_full_comparison,
 )
@@ -270,3 +270,75 @@ def replay_full_epoch_package(
             "execution_authorized": False,
             "reason": str(exc),
         }
+
+
+def _write_json(path: Path, value: Any) -> None:
+    path.write_bytes(canonical_json_bytes(value) + b"\n")
+
+
+def finalize_full_epoch_package(
+    staging_directory: Path,
+    output_directory: Path,
+    *,
+    external_authority_sha256: str,
+) -> tuple[Path, str]:
+    """Seal and replay a populated staging package before atomic publication.
+
+    Failures deliberately leave staging intact so the attempt can be retained.
+    """
+    staging = Path(staging_directory).absolute()
+    output = Path(output_directory).absolute()
+    _require(staging.is_dir() and not has_linked_ancestor(staging), "staging missing or linked")
+    _require(
+        staging.parent == output.parent
+        and not output.exists()
+        and not output.is_symlink()
+        and output.name.startswith("epoch-")
+        and output.name[6:].isdigit()
+        and len(output.name) == 10,
+        "final epoch output path is not fresh or canonical",
+    )
+    _require(
+        "artifact-manifest.json" not in snapshot_file_inventory(staging)
+        and "replay-bundle.json" not in snapshot_file_inventory(staging),
+        "staging is already sealed",
+    )
+    _write_json(
+        staging / "replay-bundle.json",
+        {
+            "kind": "m1_cuda_null_full_corpus_epoch_replay",
+            "version": FORMAT_VERSION,
+            "model_required_for_replay": False,
+            "journal_verified": False,
+            "full_corpus_complete": False,
+            "scientific_decision": "NOT_EVALUATED",
+        },
+    )
+    records, _by_key = _records(_read_json(staging / "run-records.json"))
+    expected = _expected_artifacts(records)
+    _require(snapshot_file_inventory(staging) == expected, "staging artifact inventory differs")
+    _write_json(
+        staging / "artifact-manifest.json",
+        {
+            "kind": "m1_cuda_null_full_corpus_epoch_artifact_manifest",
+            "version": FORMAT_VERSION,
+            "artifacts": [
+                {
+                    "path": relative,
+                    "size_bytes": (staging / relative).stat().st_size,
+                    "sha256": sha256_file(staging / relative),
+                }
+                for relative in sorted(expected)
+            ],
+        },
+    )
+    manifest_sha256 = sha256_file(staging / "artifact-manifest.json")
+    replay = replay_full_epoch_package(
+        staging / "replay-bundle.json",
+        manifest_sha256,
+        external_authority_sha256,
+    )
+    _require(replay.get("replay_status") == "PASS", "new full epoch package did not replay")
+    _require(output.name == f"epoch-{replay['epoch_number']:04d}", "output epoch number differs")
+    staging.replace(output)
+    return output, manifest_sha256
