@@ -72,7 +72,9 @@ def _is_sha256(value: object) -> bool:
 
 def _profile_paths(record: dict[str, Any]) -> set[str]:
     profiles = record.get("profiles")
-    _require(isinstance(profiles, list) and len(profiles) == 8, "probe profile set differs")
+    if not isinstance(profiles, list):
+        raise FullProfileProbeReplayBlocked("probe profile set differs")
+    _require(len(profiles) == 8, "probe profile set differs")
     expected_keys = [(label, role) for label, _batch in EPOCH_LAYOUT for role in _ROLES]
     paths: set[str] = set()
     for profile, (label, role) in zip(profiles, expected_keys, strict=True):
@@ -179,7 +181,9 @@ def _recompute(record: dict[str, Any], root: Path) -> dict[str, Any]:
         "probe storage projection differs",
     )
     free_bytes = record.get("free_bytes_before_probe")
-    _require(type(free_bytes) is int and free_bytes >= 0, "probe free-space observation invalid")
+    if not isinstance(free_bytes, int) or isinstance(free_bytes, bool):
+        raise FullProfileProbeReplayBlocked("probe free-space observation invalid")
+    _require(free_bytes >= 0, "probe free-space observation invalid")
     _require(
         record.get("storage_budget_satisfied")
         is (free_bytes >= required + _OPERATIONAL_FREE_RESERVE_BYTES),
@@ -219,11 +223,12 @@ def replay_full_profile_probe(bundle: Path, external_manifest_sha256: str) -> di
         )
         manifest = _read_json(manifest_path)
         entries = manifest.get("artifacts")
+        if not isinstance(entries, list):
+            raise FullProfileProbeReplayBlocked("probe manifest schema differs")
         names = sorted(expected_files - {"artifact-manifest.json"})
         _require(
             manifest.get("kind") == "m1_cuda_full_profile_storage_probe_manifest"
             and manifest.get("version") == _VERSION
-            and isinstance(entries, list)
             and len(entries) == len(names),
             "probe manifest schema differs",
         )
