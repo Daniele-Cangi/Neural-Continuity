@@ -69,7 +69,10 @@ def _require(condition: bool, reason: str) -> None:
 
 def _read_spec(external_sha256: str) -> dict[str, Any]:
     _require(SHA256.fullmatch(external_sha256) is not None, "authority SHA-256 is invalid")
-    _pinned_file(SPEC_PATH, SPEC_PATH, external_sha256, "full-corpus execution authority")
+    try:
+        _pinned_file(SPEC_PATH, SPEC_PATH, external_sha256, "full-corpus execution authority")
+    except ValueError as exc:
+        raise FullCorpusExecutionBlocked(str(exc)) from exc
     try:
         value = json.loads(SPEC_PATH.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
