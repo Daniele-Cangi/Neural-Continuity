@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import uuid
 import hashlib
+import uuid
 
 import pytest
 
