@@ -30,7 +30,7 @@ _LAYOUT = {
 }
 _ROLE_COUNTS = {"documents": 5183, "measurement_null_queries": 81}
 _PROVIDERS = {"CUDAExecutionProvider", "CPUExecutionProvider"}
-_SEGMENT_LIMIT = 64
+_SEGMENT_LIMIT = 256
 _MAX_PROFILE_BYTES = 256 * 1024 * 1024
 _FIELDS = {
     "run_label",

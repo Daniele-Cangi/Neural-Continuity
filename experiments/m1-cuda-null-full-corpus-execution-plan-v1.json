@@ -51,6 +51,7 @@
     "sampled_budget_profile_is_qualifying": false,
     "profiled_inference_must_produce_retained_embedding": true,
     "bounded_profile_segments_allowed": true,
+    "maximum_profile_segment_items": 256,
     "contiguous_canonical_id_coverage_required": true,
     "raw_provider_events_retained_for_replay": true,
     "cuda_activity_required_per_run": true,
