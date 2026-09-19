@@ -37,12 +37,14 @@ def compress_profile(source: Path, archive: Path) -> dict[str, Any]:
     archive = Path(archive).absolute()
     if not source.is_file() or has_linked_ancestor(source):
         raise ProfileArchiveBlocked("profile source missing or linked")
-    if archive.exists() or has_linked_ancestor(archive.parent):
-        raise ProfileArchiveBlocked("profile archive target exists or is linked")
+    if archive.exists():
+        raise ProfileArchiveBlocked("profile archive target exists")
     raw_size = source.stat().st_size
     if raw_size > _MAX_RAW_PROFILE_BYTES:
         raise ProfileArchiveBlocked("raw profile exceeds archive limit")
     archive.parent.mkdir(parents=True, exist_ok=True)
+    if has_linked_ancestor(archive.parent):
+        raise ProfileArchiveBlocked("profile archive target is linked")
     raw_digest = hashlib.sha256()
     with (
         source.open("rb") as source_stream,

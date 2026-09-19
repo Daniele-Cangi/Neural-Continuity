@@ -15,8 +15,8 @@ def test_profile_archive_is_deterministic_and_lossless(tmp_path: Path) -> None:
     source = tmp_path / "profile.json"
     payload = b'[{"cat":"Node","name":"kernel","args":{"provider":"CUDA"}}]' * 4096
     source.write_bytes(payload)
-    first = tmp_path / "first.json.gz"
-    second = tmp_path / "second.json.gz"
+    first = tmp_path / "first" / "profile.json.gz"
+    second = tmp_path / "second" / "profile.json.gz"
 
     first_descriptor = compress_profile(source, first)
     second_descriptor = compress_profile(source, second)
