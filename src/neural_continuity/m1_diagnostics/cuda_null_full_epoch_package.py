@@ -101,15 +101,18 @@ def _records(value: Any) -> tuple[list[dict[str, Any]], dict[tuple[str, str], di
 
 def _expected_artifacts(records: list[dict[str, Any]]) -> set[str]:
     expected = set(_TOP_LEVEL)
+    segment_count = 0
     for record in records:
         expected.add(_safe_relative(record.get("array_path")))
         segments = record.get("segments")
-        _require(isinstance(segments, list) and bool(segments), "provider segments missing")
+        if not isinstance(segments, list) or not segments:
+            raise FullEpochPackageBlocked("provider segments missing")
+        segment_count += len(segments)
         for segment in segments:
             _require(isinstance(segment, dict), "provider segment malformed")
             expected.add(_safe_relative(segment.get("profile_path")))
     _require(
-        len(expected) == len(_TOP_LEVEL) + len(records) + sum(len(r["segments"]) for r in records),
+        len(expected) == len(_TOP_LEVEL) + len(records) + segment_count,
         "artifact paths overlap",
     )
     return expected
