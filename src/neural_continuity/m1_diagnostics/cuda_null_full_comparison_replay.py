@@ -132,12 +132,13 @@ def recompute_full_comparison(
     )
     left_values = left_metrics.get("metrics")
     right_values = right_metrics.get("metrics")
-    _require(
-        isinstance(left_values, dict)
-        and isinstance(right_values, dict)
-        and set(left_values) == set(right_values) == set(_METRICS),
-        "retrieval metric set differs",
-    )
+    if (
+        not isinstance(left_values, dict)
+        or not isinstance(right_values, dict)
+        or set(left_values) != set(_METRICS)
+        or set(right_values) != set(_METRICS)
+    ):
+        raise FullComparisonReplayBlocked("retrieval metric set differs")
     return {
         "left_run_label": left_run_label,
         "right_run_label": right_run_label,
