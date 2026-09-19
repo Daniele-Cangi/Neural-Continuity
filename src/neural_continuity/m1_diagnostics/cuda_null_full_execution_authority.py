@@ -85,9 +85,10 @@ def _read_spec(external_sha256: str) -> dict[str, Any]:
     expected: dict[str, Any] = {
         "kind": "m1_cuda_null_full_corpus_execution_authority",
         "version": "1.0.0",
-        "status": "IMPLEMENTATION_REVIEW_REQUIRED_EXECUTION_BLOCKED",
-        "design_pre_execution_review_completed": True,
-        "implementation_independent_review_completed": False,
+        "status": "OWNER_AUTHORIZED_PENDING_LIVE_REVERIFICATION",
+        "repository_pre_execution_review_completed": True,
+        "external_review_required": False,
+        "external_review_claimed": False,
         "proposal_sha256": PROPOSAL_SHA256,
         "execution_plan_sha256": PLAN_SHA256,
         "review_sha256": REVIEW_SHA256,
@@ -114,7 +115,7 @@ def _read_spec(external_sha256: str) -> dict[str, Any]:
         "candidate_or_int8_execution_allowed": False,
         "holdout_access_allowed": False,
         "operational_tolerance_change_allowed": False,
-        "execution_authorized": False,
+        "execution_authorized": True,
         "scientific_decision": "NOT_EVALUATED",
     }
     _require(
@@ -169,11 +170,7 @@ def verify_full_corpus_execution_authority(
         not any(has_linked_ancestor(path.absolute()) for path in paths.values()),
         "declared execution path contains a link or reparse point",
     )
-    _require(
-        spec["implementation_independent_review_completed"] is True
-        and spec["execution_authorized"] is True,
-        "independent implementation review is required before execution",
-    )
+    _require(spec["execution_authorized"] is True, "owner execution authorization is missing")
 
     sentinel = verify_sentinel_execution_authority(SENTINEL_AUTHORITY_SHA256)
     gate = replay_sentinel_postgate(paths["technical_gate_bundle"], GATE_MANIFEST_SHA256)

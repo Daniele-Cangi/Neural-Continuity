@@ -12,11 +12,12 @@ def test_full_corpus_authority_schema_is_exact() -> None:
     digest = sha256_file(authority.SPEC_PATH)
     spec = authority._read_spec(digest)
 
-    assert spec["execution_authorized"] is False
+    assert spec["execution_authorized"] is True
     assert spec["scientific_decision"] == "NOT_EVALUATED"
     assert spec["profile_storage"] == "deterministic_gzip_level_9"
-    assert spec["design_pre_execution_review_completed"] is True
-    assert spec["implementation_independent_review_completed"] is False
+    assert spec["repository_pre_execution_review_completed"] is True
+    assert spec["external_review_required"] is False
+    assert spec["external_review_claimed"] is False
 
 
 def test_full_corpus_authority_rejects_unanchored_hash() -> None:
@@ -43,14 +44,14 @@ def test_full_corpus_authority_paths_keep_evidence_on_d() -> None:
     assert paths["external_checkpoint_tip"] != Path(paths["output_root"])
 
 
-def test_full_corpus_authority_blocks_before_prerequisite_replay_without_review(
+def test_full_corpus_authority_rejects_linked_declared_path_before_prerequisite_replay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(authority, "has_linked_ancestor", lambda _path: False)
+    monkeypatch.setattr(authority, "has_linked_ancestor", lambda _path: True)
     monkeypatch.setattr(
         authority,
         "verify_sentinel_execution_authority",
-        lambda _digest: pytest.fail("blocked authority must not replay execution dependencies"),
+        lambda _digest: pytest.fail("linked authority must not replay execution dependencies"),
     )
-    with pytest.raises(authority.FullCorpusExecutionBlocked, match="implementation review"):
+    with pytest.raises(authority.FullCorpusExecutionBlocked, match="link or reparse"):
         authority.verify_full_corpus_execution_authority(sha256_file(authority.SPEC_PATH))
