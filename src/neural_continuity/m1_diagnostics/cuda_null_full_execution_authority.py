@@ -7,7 +7,7 @@ import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from neural_continuity.m1_diagnostics.cuda_null_full_budget_replay import (
     replay_budget_package,
@@ -134,13 +134,14 @@ def _paths(spec: dict[str, Any]) -> dict[str, Path]:
         "external_checkpoint_tip",
     }
     raw = spec.get("paths")
+    _require(isinstance(raw, dict), "execution authority path set differs")
+    path_values = cast(dict[str, Any], raw)
     _require(
-        isinstance(raw, dict)
-        and set(raw) == names
-        and all(isinstance(raw[name], str) and raw[name] for name in names),
+        set(path_values) == names
+        and all(isinstance(path_values[name], str) and path_values[name] for name in names),
         "execution authority path set differs",
     )
-    return {name: Path(raw[name]) for name in names}
+    return {name: Path(path_values[name]) for name in names}
 
 
 def verify_full_corpus_execution_authority(
@@ -193,8 +194,12 @@ def verify_full_corpus_execution_authority(
     _require(not output.exists(), "fresh full-corpus output root already exists")
     _require(not checkpoint.exists(), "external checkpoint tip already exists")
     _require(scratch.is_dir() and not scratch.is_symlink(), "declared scratch root is unavailable")
-    minimum_free = compression.get("minimum_free_bytes_before_execution")
-    _require(type(minimum_free) is int and minimum_free > 0, "storage minimum is invalid")
+    raw_minimum_free = compression.get("minimum_free_bytes_before_execution")
+    _require(
+        type(raw_minimum_free) is int and raw_minimum_free > 0,
+        "storage minimum is invalid",
+    )
+    minimum_free = cast(int, raw_minimum_free)
     free = shutil.disk_usage(evidence_parent).free
     _require(free >= minimum_free, "live free storage is below the frozen minimum")
     return FullCorpusExecutionAuthority(external_sha256, sentinel, paths, minimum_free, free)
