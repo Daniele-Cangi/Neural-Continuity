@@ -10,12 +10,17 @@ import hashlib
 import json
 import math
 import re
+import tempfile
 from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from neural_continuity.evidence import canonical_json_bytes, sha256_file
+from neural_continuity.evidence import canonical_json_bytes
+from neural_continuity.m1_diagnostics.cuda_null_full_profile_archive import (
+    ProfileArchiveBlocked,
+    materialize_profile,
+)
 from neural_continuity.m1_diagnostics.cuda_null_paths import (
     has_linked_ancestor,
     snapshot_file_inventory,
@@ -41,7 +46,7 @@ _FIELDS = {
     "ordered_ids_sha256",
     "embeddings_sha256",
     "profile_path",
-    "profile_sha256",
+    "profile_archive",
     "inference_call_count",
     "provider_event_counts",
     "operator_event_counts",
@@ -120,55 +125,72 @@ def replay_full_provider_coverage(
     provider_totals: Counter[str] = Counter()
     operator_totals: dict[str, Counter[str]] = {}
     call_total = 0
-    for index, segment in enumerate(segments, start=1):
-        _require(isinstance(segment, dict) and set(segment) == _FIELDS, "segment schema differs")
-        _require(
-            segment["run_label"] == run_label
-            and segment["role"] == role
-            and type(segment["batch_size"]) is int
-            and segment["batch_size"] == batch_size,
-            "segment run identity differs",
-        )
-        start, end = segment["start"], segment["end"]
-        _require(
-            type(start) is int
-            and type(end) is int
-            and start == next_start
-            and start < end <= len(ordered_ids)
-            and end - start <= _SEGMENT_LIMIT,
-            "segment skips, repeats, or exceeds the bounded input range",
-        )
-        expected_id_hash = hashlib.sha256(
-            canonical_json_bytes(list(ordered_ids[start:end]))
-        ).hexdigest()
-        _require(segment["ordered_ids_sha256"] == expected_id_hash, "segment ID hash differs")
-        _digest(segment["embeddings_sha256"], "segment embedding hash")
-        _digest(segment["profile_sha256"], "segment profile hash")
-        relative = f"profiles/{run_label}/{role}/segment-{index:04d}.json"
-        _require(segment["profile_path"] == relative, "segment profile path differs")
-        profile = root / relative
-        _require(
-            profile.is_file() and not has_linked_ancestor(profile), "profile missing or linked"
-        )
-        _require(sha256_file(profile) == segment["profile_sha256"], "raw profile hash differs")
-        calls = math.ceil((end - start) / batch_size)
-        _require(
-            type(segment["inference_call_count"]) is int
-            and segment["inference_call_count"] == calls,
-            "declared inference-call count differs",
-        )
-        providers, operators = _counts(profile, calls)
-        _require(
-            segment["provider_event_counts"] == providers
-            and segment["operator_event_counts"] == operators,
-            "provider/operator summary differs from raw events",
-        )
-        provider_totals.update(providers)
-        for provider, counts in operators.items():
-            operator_totals.setdefault(provider, Counter()).update(counts)
-        call_total += calls
-        expected_files.add(profile.name)
-        next_start = end
+    with tempfile.TemporaryDirectory(prefix="full-provider-replay-") as temporary:
+        scratch = Path(temporary)
+        for index, segment in enumerate(segments, start=1):
+            _require(
+                isinstance(segment, dict) and set(segment) == _FIELDS,
+                "segment schema differs",
+            )
+            _require(
+                segment["run_label"] == run_label
+                and segment["role"] == role
+                and type(segment["batch_size"]) is int
+                and segment["batch_size"] == batch_size,
+                "segment run identity differs",
+            )
+            start, end = segment["start"], segment["end"]
+            _require(
+                type(start) is int
+                and type(end) is int
+                and start == next_start
+                and start < end <= len(ordered_ids)
+                and end - start <= _SEGMENT_LIMIT,
+                "segment skips, repeats, or exceeds the bounded input range",
+            )
+            expected_id_hash = hashlib.sha256(
+                canonical_json_bytes(list(ordered_ids[start:end]))
+            ).hexdigest()
+            _require(
+                segment["ordered_ids_sha256"] == expected_id_hash,
+                "segment ID hash differs",
+            )
+            _digest(segment["embeddings_sha256"], "segment embedding hash")
+            relative = f"profiles/{run_label}/{role}/segment-{index:04d}.json.gz"
+            _require(segment["profile_path"] == relative, "segment profile path differs")
+            profile = root / relative
+            _require(
+                profile.is_file() and not has_linked_ancestor(profile),
+                "profile archive missing or linked",
+            )
+            calls = math.ceil((end - start) / batch_size)
+            _require(
+                type(segment["inference_call_count"]) is int
+                and segment["inference_call_count"] == calls,
+                "declared inference-call count differs",
+            )
+            try:
+                with materialize_profile(
+                    profile,
+                    segment["profile_archive"],
+                    scratch,
+                ) as raw_profile:
+                    providers, operators = _counts(raw_profile, calls)
+            except ProfileArchiveBlocked as exc:
+                raise FullProviderCoverageBlocked(
+                    "lossless provider profile replay blocked"
+                ) from exc
+            _require(
+                segment["provider_event_counts"] == providers
+                and segment["operator_event_counts"] == operators,
+                "provider/operator summary differs from raw events",
+            )
+            provider_totals.update(providers)
+            for provider, counts in operators.items():
+                operator_totals.setdefault(provider, Counter()).update(counts)
+            call_total += calls
+            expected_files.add(profile.name)
+            next_start = end
     _require(next_start == len(ordered_ids), "full-input provider coverage incomplete")
     _require(
         snapshot_file_inventory(profile_dir) == expected_files,
@@ -189,6 +211,7 @@ def replay_full_provider_coverage(
         },
         "cpu_fallback_operator_types": sorted(operator_totals.get("CPUExecutionProvider", {})),
         "raw_profiles_retained": True,
+        "profile_storage": "deterministic_gzip_level_9",
         "embeddings_replayed": False,
         "model_loaded": False,
         "execution_authorized": False,

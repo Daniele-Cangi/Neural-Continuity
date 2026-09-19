@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import math
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +14,9 @@ from neural_continuity.m1_b.onnx_source import encode_onnx_source
 from neural_continuity.m1_diagnostics.cuda_null_full_epoch_format import (
     EMBEDDING_DIMENSION,
     PROVIDERS,
+)
+from neural_continuity.m1_diagnostics.cuda_null_full_profile_archive import (
+    compress_profile,
 )
 from neural_continuity.m1_diagnostics.cuda_null_full_raw_replay import replay_full_raw_run
 from neural_continuity.m1_diagnostics.cuda_null_paths import has_linked_ancestor
@@ -100,11 +102,10 @@ def _capture_profiled_role(
         )
         block = np.ascontiguousarray(embeddings, dtype="<f4")
         output[start:end] = block
-        relative_profile = f"profiles/{run_label}/{role}/segment-{number:04d}.json"
+        relative_profile = f"profiles/{run_label}/{role}/segment-{number:04d}.json.gz"
         retained_profile = staging / relative_profile
         _require(not retained_profile.exists(), "profile segment already exists")
-        shutil.copyfile(raw_profile, retained_profile)
-        profile_sha256 = sha256_file(retained_profile)
+        profile_archive = compress_profile(raw_profile, retained_profile)
         summary = _profile_summary(raw_profile, PROVIDERS)
         _require(
             summary["unclassified_cpu_events"] == 0 and summary["undeclared_providers"] == [],
@@ -122,7 +123,7 @@ def _capture_profiled_role(
                 ).hexdigest(),
                 "embeddings_sha256": hashlib.sha256(block.tobytes(order="C")).hexdigest(),
                 "profile_path": relative_profile,
-                "profile_sha256": profile_sha256,
+                "profile_archive": profile_archive,
                 "inference_call_count": math.ceil((end - start) / batch_size),
                 "provider_event_counts": summary["provider_event_counts"],
                 "operator_event_counts": summary["operator_event_counts"],

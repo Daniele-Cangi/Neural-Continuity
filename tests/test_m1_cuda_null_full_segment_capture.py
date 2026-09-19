@@ -64,3 +64,8 @@ def test_segmented_capture_covers_every_document_and_replays(tmp_path, monkeypat
     assert record["segments"][0]["start"] == 0
     assert record["segments"][-1]["end"] == 5183
     assert max(segment["end"] - segment["start"] for segment in record["segments"]) == 256
+    assert all(segment["profile_path"].endswith(".json.gz") for segment in record["segments"])
+    assert all(
+        segment["profile_archive"]["compression"] == "gzip" for segment in record["segments"]
+    )
+    assert not list((staging / "profiles").rglob("*.json"))
