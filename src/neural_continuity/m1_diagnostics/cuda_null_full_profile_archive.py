@@ -44,17 +44,20 @@ def compress_profile(source: Path, archive: Path) -> dict[str, Any]:
         raise ProfileArchiveBlocked("raw profile exceeds archive limit")
     archive.parent.mkdir(parents=True, exist_ok=True)
     raw_digest = hashlib.sha256()
-    with source.open("rb") as source_stream, archive.open("xb") as archive_stream:
-        with gzip.GzipFile(
+    with (
+        source.open("rb") as source_stream,
+        archive.open("xb") as archive_stream,
+        gzip.GzipFile(
             filename="",
             mode="wb",
             compresslevel=9,
             fileobj=archive_stream,
             mtime=0,
-        ) as compressed_stream:
-            while chunk := source_stream.read(_CHUNK_BYTES):
-                raw_digest.update(chunk)
-                compressed_stream.write(chunk)
+        ) as compressed_stream,
+    ):
+        while chunk := source_stream.read(_CHUNK_BYTES):
+            raw_digest.update(chunk)
+            compressed_stream.write(chunk)
     archive_size = archive.stat().st_size
     if archive_size > _MAX_ARCHIVE_BYTES:
         archive.unlink(missing_ok=True)

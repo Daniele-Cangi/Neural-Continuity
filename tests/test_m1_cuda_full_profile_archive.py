@@ -35,9 +35,11 @@ def test_profile_archive_tamper_fails_closed(tmp_path: Path) -> None:
     descriptor = compress_profile(source, archive)
     archive.write_bytes(archive.read_bytes() + b"tamper")
 
-    with pytest.raises(ProfileArchiveBlocked, match="archive integrity"):
-        with materialize_profile(archive, descriptor, tmp_path):
-            pass
+    with (
+        pytest.raises(ProfileArchiveBlocked, match="archive integrity"),
+        materialize_profile(archive, descriptor, tmp_path),
+    ):
+        pass
 
 
 def test_profile_archive_declared_size_fails_closed(tmp_path: Path) -> None:
@@ -47,6 +49,8 @@ def test_profile_archive_declared_size_fails_closed(tmp_path: Path) -> None:
     descriptor = compress_profile(source, archive)
     descriptor["raw_size_bytes"] = 1
 
-    with pytest.raises(ProfileArchiveBlocked, match="exceeds declared size"):
-        with materialize_profile(archive, descriptor, tmp_path):
-            pass
+    with (
+        pytest.raises(ProfileArchiveBlocked, match="exceeds declared size"),
+        materialize_profile(archive, descriptor, tmp_path),
+    ):
+        pass
