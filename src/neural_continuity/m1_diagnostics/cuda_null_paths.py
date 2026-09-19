@@ -25,7 +25,13 @@ def path_is_link_or_reparse(path: Path) -> bool:
 
 
 def has_linked_ancestor(path: Path) -> bool:
-    return any(path_is_link_or_reparse(part) for part in (path, *path.parents))
+    for part in (path, *path.parents):
+        try:
+            if path_is_link_or_reparse(part):
+                return True
+        except FileNotFoundError:
+            continue
+    return False
 
 
 def snapshot_file_inventory(root: Path) -> set[str]:
