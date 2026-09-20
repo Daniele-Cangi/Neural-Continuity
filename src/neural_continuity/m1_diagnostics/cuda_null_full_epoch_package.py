@@ -54,6 +54,17 @@ def _require(condition: bool, reason: str) -> None:
         raise FullEpochPackageBlocked(reason)
 
 
+def _validate_retrieval_run_maps(rankings: Any, metrics: Any) -> None:
+    labels = {label for label, _batch in RUN_LAYOUT}
+    _require(
+        isinstance(rankings, dict)
+        and isinstance(metrics, dict)
+        and set(rankings) == labels
+        and set(metrics) == labels,
+        "retrieval run set differs",
+    )
+
+
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
@@ -197,14 +208,7 @@ def replay_full_epoch_package(
         validate_full_epoch_runtime(runtime)
         rankings = _read_json(package / "rankings.json")
         metrics = _read_json(package / "metrics.json")
-        labels = [label for label, _batch in RUN_LAYOUT]
-        _require(
-            isinstance(rankings, dict)
-            and isinstance(metrics, dict)
-            and list(rankings) == labels
-            and list(metrics) == labels,
-            "retrieval run set or order differs",
-        )
+        _validate_retrieval_run_maps(rankings, metrics)
         comparisons = _read_json(package / "within-epoch-comparisons.json")
         _require(
             isinstance(comparisons, list) and len(comparisons) == len(COMPARISON_PAIRS),
