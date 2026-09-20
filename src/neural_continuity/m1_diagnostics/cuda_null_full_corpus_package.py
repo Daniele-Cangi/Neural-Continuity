@@ -143,21 +143,23 @@ def _recompute(
             "metrics": metrics["batch_16_primary"],
         }
         if epoch % 2 == 0:
-            _require(prior is not None, "restart pair predecessor missing")
+            if prior is None:
+                raise FullCorpusPackageBlocked("restart pair predecessor missing")
+            previous = prior
             comparison = recompute_full_comparison(
-                prior["directory"],
+                previous["directory"],
                 current["directory"],
                 left_run_label="batch_16_primary",
                 right_run_label="batch_16_primary",
                 document_ids=current["document_ids"],
                 query_ids=current["query_ids"],
                 qrels=current["qrels"],
-                left_document_record=prior["document_record"],
-                left_query_record=prior["query_record"],
+                left_document_record=previous["document_record"],
+                left_query_record=previous["query_record"],
                 right_document_record=current["document_record"],
                 right_query_record=current["query_record"],
-                left_rankings=prior["rankings"],
-                left_metrics=prior["metrics"],
+                left_rankings=previous["rankings"],
+                left_metrics=previous["metrics"],
                 right_rankings=current["rankings"],
                 right_metrics=current["metrics"],
             )
