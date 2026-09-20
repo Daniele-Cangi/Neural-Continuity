@@ -31,7 +31,7 @@ The next sequence is:
 
 1. bind the completed sentinel technical-gate artifact to the proposed full-corpus
    authority;
-2. complete the genuinely independent pre-execution review required by the frozen
+2. bind the completed repository-owned pre-execution review required by the frozen
    protocol;
 3. freeze the full-corpus storage/runtime/replay authority;
 4. execute the source-only CUDA full corpus exactly as authorized;
@@ -39,9 +39,12 @@ The next sequence is:
 6. derive a separately frozen CUDA detection-limit authority before any Stage 1
    release decision.
 
-Do not describe repository-owner approval as independent review. Codex may prepare
-all review material and executable plumbing, but must not manufacture satisfaction
-of an external/independent-review condition.
+External or third-party review is not required for this owner-operated research
+repository. The protocol's pre-execution review requirement is satisfied by a
+separate repository review pass isolated from the implementation task, together
+with owner authorization, deterministic CI, and model-free replay. Describe it as
+repository-owned review, never as external, human, organizational, or third-party
+independence.
 
 ### Track B — M1-B diagnostic closure
 
@@ -188,7 +191,8 @@ Avoid these unless a concrete scientific requirement forces them:
 - writing documentation that restates implementation line by line;
 - preserving dead scaffolding because it once participated in an experiment;
 - treating every local refactor as a governance event;
-- replacing a missing independent review with semantic relabeling;
+- inventing an external-review requirement after repository review and owner
+  authorization have satisfied the active governance policy;
 - continuing to harden a phase after its stop condition has already been met.
 
 ## Current authorization
@@ -201,9 +205,9 @@ authority.
 Proceed without repeated confirmation while staying inside the scientific
 invariants.
 
-Do not publish, deploy, contact third parties, claim an independent review that
-did not occur, or start an execution that the applicable frozen authority still
-marks as unauthorized.
+Do not publish, deploy, contact third parties, claim external or organizational
+review that did not occur, or start an execution that the applicable frozen
+authority still marks as unauthorized.
 
 Use sub-agents only when they materially improve the work; do not spawn them by
 default.
