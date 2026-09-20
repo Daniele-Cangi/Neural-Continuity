@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 import uuid
 from pathlib import Path
@@ -45,6 +46,8 @@ from neural_continuity.m1_diagnostics.cuda_null_source_preflight_inputs import (
 from neural_continuity.m1_diagnostics.cuda_null_source_preflight_runtime import (
     _reverify_teacher_source,
 )
+
+_SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -110,7 +113,7 @@ def _validate_attempt(
         raise FullCorpusExecutionBlocked("first epoch cannot have a predecessor")
     if epoch_number > 1 and (
         not isinstance(previous_completed_epoch_manifest_sha256, str)
-        or len(previous_completed_epoch_manifest_sha256) != 64
+        or _SHA256.fullmatch(previous_completed_epoch_manifest_sha256) is None
     ):
         raise FullCorpusExecutionBlocked("later epoch requires completed predecessor")
 

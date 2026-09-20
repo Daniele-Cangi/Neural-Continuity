@@ -14,8 +14,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from neural_continuity.evidence import canonical_json_bytes
+from neural_continuity.evidence import canonical_json_bytes, sha256_file
 from neural_continuity.m1_diagnostics.cuda_null_full_attempt_journal import (
+    FullCorpusJournalBlocked,
     append_attempt_event,
     verify_attempt_journal,
 )
@@ -92,6 +93,91 @@ def _package_verifier(root: Path, authority_sha256: str) -> PackageVerifier:
         return replay.get("replay_status") == "PASS" and replay.get("epoch_number") == epoch
 
     return verify
+
+
+def _verify_or_recover_journal(
+    journal: Path,
+    checkpoint: Path,
+    tip: str,
+    authority_sha256: str,
+    package_verifier: PackageVerifier,
+) -> tuple[dict[str, Any], str]:
+    """Recover only the single fsynced event allowed before tip replacement."""
+    try:
+        state = verify_attempt_journal(
+            journal,
+            external_tip_sha256=tip,
+            authority_sha256=authority_sha256,
+            package_verifier=package_verifier,
+        )
+        return state, tip
+    except FullCorpusJournalBlocked as original:
+        checkpoints = sorted(journal.glob("*.json")) if journal.is_dir() else []
+        if not checkpoints:
+            raise original
+        latest = checkpoints[-1]
+        try:
+            record = json.loads(latest.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise FullCorpusExecutionBlocked(
+                "unanchored journal checkpoint cannot be decoded"
+            ) from exc
+        if not isinstance(record, dict) or record.get("previous_sha256") != tip:
+            raise original
+        recovered_tip = sha256_file(latest)
+        state = verify_attempt_journal(
+            journal,
+            external_tip_sha256=recovered_tip,
+            authority_sha256=authority_sha256,
+            package_verifier=package_verifier,
+        )
+        _write_tip(checkpoint, authority_sha256, recovered_tip)
+        return state, recovered_tip
+
+
+def _open_attempt_process(journal: Path, state: dict[str, Any]) -> str:
+    sequence = state["checkpoint_count"]
+    try:
+        record = json.loads((journal / f"{sequence:08d}.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise FullCorpusExecutionBlocked("open attempt intent cannot be decoded") from exc
+    process = record.get("process_instance_id") if isinstance(record, dict) else None
+    if not isinstance(record, dict) or record.get("kind") != "attempt_started":
+        raise FullCorpusExecutionBlocked("open attempt intent differs")
+    if not isinstance(process, str):
+        raise FullCorpusExecutionBlocked("open attempt process identity differs")
+    return process
+
+
+def _published_manifest(
+    root: Path,
+    authority_sha256: str,
+    epoch: int,
+    attempt: int,
+    process_instance_id: str,
+    predecessor: str | None,
+) -> str | None:
+    output = root / f"epoch-{epoch:04d}"
+    if not output.exists():
+        return None
+    manifest_path = output / "artifact-manifest.json"
+    if not manifest_path.is_file() or has_linked_ancestor(manifest_path):
+        raise FullCorpusExecutionBlocked("published epoch manifest path is invalid")
+    manifest = sha256_file(manifest_path)
+    replay = replay_full_epoch_package(
+        output / "replay-bundle.json",
+        manifest,
+        authority_sha256,
+    )
+    if (
+        replay.get("replay_status") != "PASS"
+        or replay.get("epoch_number") != epoch
+        or replay.get("attempt_number") != attempt
+        or replay.get("process_instance_id") != process_instance_id
+        or replay.get("previous_completed_epoch_manifest_sha256") != predecessor
+    ):
+        raise FullCorpusExecutionBlocked("published epoch does not match open attempt")
+    return manifest
 
 
 def _initialize(authority: FullCorpusExecutionAuthority) -> tuple[Path, Path, str]:
@@ -218,28 +304,55 @@ def run_full_corpus(authority_sha256: str, *, resume: bool) -> dict[str, Any]:
     root, checkpoint, tip = _resume(authority) if resume else _initialize(authority)
     journal = root / "attempt-journal"
     package_verifier = _package_verifier(root, authority_sha256)
-    state = verify_attempt_journal(
+    state, tip = _verify_or_recover_journal(
         journal,
-        external_tip_sha256=tip,
-        authority_sha256=authority_sha256,
-        package_verifier=package_verifier,
+        checkpoint,
+        tip,
+        authority_sha256,
+        package_verifier,
     )
     if state["open_attempt"] is not None:
         epoch, attempt = state["open_attempt"]
-        tip = _persist_event(
-            journal,
-            checkpoint,
-            tip,
+        process_instance_id = _open_attempt_process(journal, state)
+        completed = state["completed_epoch_manifests"]
+        predecessor = completed.get(epoch - 1) if epoch > 1 else None
+        published = _published_manifest(
+            root,
             authority_sha256,
-            {
-                "kind": "attempt_interrupted",
-                "epoch": epoch,
-                "attempt": attempt,
-                "technical_status": "EXECUTION_ERROR",
-                "error_summary": "controller resumed after an unclosed child attempt",
-            },
-            package_verifier,
+            epoch,
+            attempt,
+            process_instance_id,
+            predecessor,
         )
+        if published is not None:
+            tip = _persist_event(
+                journal,
+                checkpoint,
+                tip,
+                authority_sha256,
+                {
+                    "kind": "epoch_completed",
+                    "epoch": epoch,
+                    "attempt": attempt,
+                    "package_manifest_sha256": published,
+                },
+                package_verifier,
+            )
+        else:
+            tip = _persist_event(
+                journal,
+                checkpoint,
+                tip,
+                authority_sha256,
+                {
+                    "kind": "attempt_interrupted",
+                    "epoch": epoch,
+                    "attempt": attempt,
+                    "technical_status": "EXECUTION_ERROR",
+                    "error_summary": "controller resumed after an unclosed child attempt",
+                },
+                package_verifier,
+            )
         state = verify_attempt_journal(
             journal,
             external_tip_sha256=tip,
@@ -277,8 +390,20 @@ def run_full_corpus(authority_sha256: str, *, resume: bool) -> dict[str, Any]:
             )
         except (OSError, subprocess.SubprocessError) as exc:
             child = subprocess.CompletedProcess([], 1, "", str(exc))
-        if child.returncode != 0:
-            summary = (child.stderr or "child process failed without stderr")[-1024:]
+        manifest = _published_manifest(
+            root,
+            authority_sha256,
+            epoch,
+            attempt,
+            process_instance_id,
+            predecessor,
+        )
+        if manifest is None:
+            summary = (
+                child.stderr
+                or ("child completed without publishing an epoch" if child.returncode == 0 else "")
+                or "child process failed without stderr"
+            )[-1024:]
             tip = _persist_failure(
                 journal,
                 checkpoint,
@@ -290,42 +415,6 @@ def run_full_corpus(authority_sha256: str, *, resume: bool) -> dict[str, Any]:
                 package_verifier,
             )
             raise FullCorpusExecutionBlocked(f"epoch {epoch} attempt {attempt} failed: {summary}")
-        try:
-            result = json.loads(child.stdout)
-        except (TypeError, json.JSONDecodeError) as exc:
-            summary = "child result cannot be decoded"
-            tip = _persist_failure(
-                journal,
-                checkpoint,
-                tip,
-                authority_sha256,
-                epoch,
-                attempt,
-                summary,
-                package_verifier,
-            )
-            raise FullCorpusExecutionBlocked("child result cannot be decoded") from exc
-        manifest = result.get("manifest_sha256") if isinstance(result, dict) else None
-        if (
-            not isinstance(result, dict)
-            or result.get("epoch_number") != epoch
-            or result.get("attempt_number") != attempt
-            or result.get("process_instance_id") != process_instance_id
-            or not isinstance(manifest, str)
-            or not package_verifier(epoch, manifest)
-        ):
-            summary = "child result or package replay differs"
-            tip = _persist_failure(
-                journal,
-                checkpoint,
-                tip,
-                authority_sha256,
-                epoch,
-                attempt,
-                summary,
-                package_verifier,
-            )
-            raise FullCorpusExecutionBlocked("child result or package replay differs")
         tip = _persist_event(
             journal,
             checkpoint,
@@ -347,10 +436,11 @@ def run_full_corpus(authority_sha256: str, *, resume: bool) -> dict[str, Any]:
             package_verifier=package_verifier,
         )
     return {
-        "status": "FULL_CORPUS_CAPTURE_COMPLETE_NOT_DECIDED",
+        "status": "FULL_CORPUS_EPOCH_CAPTURE_COMPLETE_AGGREGATION_PENDING",
         "epoch_count": 120,
         "checkpoint_tip_sha256": tip,
         "all_epoch_packages_replayed": True,
+        "process_restart_variation_status": "PENDING",
         "scientific_decision": "NOT_EVALUATED",
     }
 

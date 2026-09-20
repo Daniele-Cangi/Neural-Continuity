@@ -70,6 +70,7 @@ def test_attempt_intent_is_durable_before_child_and_completion_replays(
         )
 
     monkeypatch.setattr(runner, "_run_child", child)
+    monkeypatch.setattr(runner, "_published_manifest", lambda *_args: MANIFEST)
     original_verify = runner.verify_attempt_journal
     calls = 0
 
@@ -88,7 +89,7 @@ def test_attempt_intent_is_durable_before_child_and_completion_replays(
         lambda *_args, **_kwargs: authority,
     )
     result = runner.run_full_corpus(AUTHORITY, resume=True)
-    assert result["status"] == "FULL_CORPUS_CAPTURE_COMPLETE_NOT_DECIDED"
+    assert result["status"] == "FULL_CORPUS_EPOCH_CAPTURE_COMPLETE_AGGREGATION_PENDING"
     assert calls >= 2
     final_tip = runner._read_tip(checkpoint, AUTHORITY)
     state = original_verify(
@@ -142,7 +143,11 @@ def test_invalid_child_result_closes_attempt_fail_closed(
         "_run_child",
         lambda *_args: SimpleNamespace(returncode=0, stdout="not-json", stderr=""),
     )
-    with pytest.raises(runner.FullCorpusExecutionBlocked, match="child result cannot be decoded"):
+    monkeypatch.setattr(runner, "_published_manifest", lambda *_args: None)
+    with pytest.raises(
+        runner.FullCorpusExecutionBlocked,
+        match="child completed without publishing an epoch",
+    ):
         runner.run_full_corpus(AUTHORITY, resume=True)
     tip = runner._read_tip(authority.paths["external_checkpoint_tip"], AUTHORITY)
     state = verify_attempt_journal(
@@ -153,3 +158,33 @@ def test_invalid_child_result_closes_attempt_fail_closed(
     assert state["open_attempt"] is None
     assert state["next_epoch"] == 1
     assert state["next_attempt"] == 2
+
+
+def test_resume_recovers_fsynced_checkpoint_before_external_tip(
+    tmp_path: Path,
+) -> None:
+    authority = _authority(tmp_path)
+    root, checkpoint, old_tip = runner._initialize(authority)
+    journal = root / "attempt-journal"
+    new_tip = runner.append_attempt_event(
+        journal,
+        external_tip_sha256=old_tip,
+        authority_sha256=AUTHORITY,
+        event={
+            "kind": "attempt_started",
+            "epoch": 1,
+            "attempt": 1,
+            "process_instance_id": "12345678-1234-5678-1234-567812345678",
+            "runtime_identity_sha256": RUNTIME,
+        },
+    )
+    state, recovered_tip = runner._verify_or_recover_journal(
+        journal,
+        checkpoint,
+        old_tip,
+        AUTHORITY,
+        lambda _epoch, _manifest: True,
+    )
+    assert recovered_tip == new_tip
+    assert runner._read_tip(checkpoint, AUTHORITY) == new_tip
+    assert state["open_attempt"] == (1, 1)

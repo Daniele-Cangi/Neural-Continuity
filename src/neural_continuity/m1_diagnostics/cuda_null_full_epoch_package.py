@@ -250,6 +250,10 @@ def replay_full_epoch_package(
             "execution_authority_sha256": external_authority_sha256,
             "epoch_number": plan["epoch_number"],
             "attempt_number": plan["attempt_number"],
+            "process_instance_id": runtime["process_instance_id"],
+            "previous_completed_epoch_manifest_sha256": plan[
+                "previous_completed_epoch_manifest_sha256"
+            ],
             "within_epoch_units": [repeated, batch],
             "journal_verified": False,
             "full_corpus_complete": False,
