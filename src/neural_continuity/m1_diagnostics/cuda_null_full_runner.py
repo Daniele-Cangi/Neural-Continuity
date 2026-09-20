@@ -20,6 +20,10 @@ from neural_continuity.m1_diagnostics.cuda_null_full_attempt_journal import (
     append_attempt_event,
     verify_attempt_journal,
 )
+from neural_continuity.m1_diagnostics.cuda_null_full_corpus_package import (
+    finalize_full_corpus_package,
+    replay_full_corpus_package,
+)
 from neural_continuity.m1_diagnostics.cuda_null_full_epoch_capture import capture_full_epoch
 from neural_continuity.m1_diagnostics.cuda_null_full_epoch_package import (
     replay_full_epoch_package,
@@ -265,6 +269,54 @@ def _persist_failure(
     )
 
 
+def _finalize_or_replay_corpus(
+    root: Path,
+    checkpoint: Path,
+    authority_sha256: str,
+    final_checkpoint_tip_sha256: str,
+    completed: dict[int, str],
+) -> tuple[str, dict[str, Any]]:
+    declarations = [
+        {"epoch": epoch, "manifest_sha256": completed[epoch]} for epoch in range(1, 121)
+    ]
+    package = root / "full-corpus-package"
+    if package.exists():
+        manifest_sha256 = sha256_file(package / "artifact-manifest.json")
+    else:
+        package, manifest_sha256 = finalize_full_corpus_package(
+            root,
+            authority_sha256,
+            final_checkpoint_tip_sha256,
+            declarations,
+        )
+    replay = replay_full_corpus_package(
+        package / "replay-bundle.json",
+        manifest_sha256,
+        authority_sha256,
+        final_checkpoint_tip_sha256,
+    )
+    if replay.get("replay_status") != "PASS":
+        raise FullCorpusExecutionBlocked("complete full-corpus replay blocked")
+    final_anchor = checkpoint.with_name(f"{checkpoint.stem}.final-manifest.json")
+    expected_anchor = {
+        "kind": "m1_cuda_full_corpus_external_final_manifest",
+        "version": "1.0.0",
+        "authority_sha256": authority_sha256,
+        "final_checkpoint_tip_sha256": final_checkpoint_tip_sha256,
+        "artifact_manifest_sha256": manifest_sha256,
+    }
+    if final_anchor.exists():
+        try:
+            observed_anchor = json.loads(final_anchor.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise FullCorpusExecutionBlocked("external final anchor cannot be decoded") from exc
+        if observed_anchor != expected_anchor:
+            raise FullCorpusExecutionBlocked("external final anchor differs")
+    else:
+        _write_json_atomic(final_anchor, expected_anchor)
+    return manifest_sha256, replay
+
+
 def _run_child(
     authority_sha256: str,
     epoch: int,
@@ -435,12 +487,24 @@ def run_full_corpus(authority_sha256: str, *, resume: bool) -> dict[str, Any]:
             authority_sha256=authority_sha256,
             package_verifier=package_verifier,
         )
+    completed = state["completed_epoch_manifests"]
+    if set(completed) != set(range(1, 121)):
+        raise FullCorpusExecutionBlocked("complete epoch manifest coverage differs")
+    final_manifest, corpus_replay = _finalize_or_replay_corpus(
+        root,
+        checkpoint,
+        authority_sha256,
+        tip,
+        completed,
+    )
     return {
-        "status": "FULL_CORPUS_EPOCH_CAPTURE_COMPLETE_AGGREGATION_PENDING",
+        "status": "CAPTURED_NOT_DECIDED",
         "epoch_count": 120,
         "checkpoint_tip_sha256": tip,
         "all_epoch_packages_replayed": True,
-        "process_restart_variation_status": "PENDING",
+        "process_restart_variation_status": "REPLAY_VERIFIED",
+        "family_unit_counts": corpus_replay["family_unit_counts"],
+        "artifact_manifest_sha256": final_manifest,
         "scientific_decision": "NOT_EVALUATED",
     }
 
