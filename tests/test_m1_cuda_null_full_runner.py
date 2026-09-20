@@ -105,6 +105,12 @@ def test_attempt_intent_is_durable_before_child_and_completion_replays(
     )
     result = runner.run_full_corpus(AUTHORITY, resume=True)
     assert result["status"] == "CAPTURED_NOT_DECIDED"
+    assert result["artifact_manifest_sha256"] == MANIFEST
+    assert result["family_unit_counts"] == {
+        "repeated_inference": 120,
+        "batch_size_variation": 120,
+        "process_restart_variation": 60,
+    }
     assert calls >= 2
     final_tip = runner._read_tip(checkpoint, AUTHORITY)
     state = original_verify(

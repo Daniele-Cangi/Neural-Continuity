@@ -281,7 +281,20 @@ def _finalize_or_replay_corpus(
     ]
     package = root / "full-corpus-package"
     if package.exists():
-        manifest_sha256 = sha256_file(package / "artifact-manifest.json")
+        manifest_path = package / "artifact-manifest.json"
+        if (
+            not package.is_dir()
+            or has_linked_ancestor(package)
+            or not manifest_path.is_file()
+            or has_linked_ancestor(manifest_path)
+        ):
+            raise FullCorpusExecutionBlocked("existing full-corpus package path is invalid")
+        try:
+            manifest_sha256 = sha256_file(manifest_path)
+        except OSError as exc:
+            raise FullCorpusExecutionBlocked(
+                "existing full-corpus manifest cannot be read"
+            ) from exc
     else:
         package, manifest_sha256 = finalize_full_corpus_package(
             root,
@@ -296,7 +309,9 @@ def _finalize_or_replay_corpus(
         final_checkpoint_tip_sha256,
     )
     if replay.get("replay_status") != "PASS":
-        raise FullCorpusExecutionBlocked("complete full-corpus replay blocked")
+        raise FullCorpusExecutionBlocked(
+            f"complete full-corpus replay blocked: {replay.get('reason', 'unknown reason')}"
+        )
     final_anchor = checkpoint.with_name(f"{checkpoint.stem}.final-manifest.json")
     expected_anchor = {
         "kind": "m1_cuda_full_corpus_external_final_manifest",
@@ -307,6 +322,8 @@ def _finalize_or_replay_corpus(
     }
     if final_anchor.exists():
         try:
+            if not final_anchor.is_file() or has_linked_ancestor(final_anchor):
+                raise OSError("external final anchor path invalid")
             observed_anchor = json.loads(final_anchor.read_text(encoding="utf-8"))
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
             raise FullCorpusExecutionBlocked("external final anchor cannot be decoded") from exc

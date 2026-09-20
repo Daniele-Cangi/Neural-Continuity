@@ -296,7 +296,8 @@ def finalize_full_corpus_package(
     """Build, replay, and atomically publish the complete corpus package."""
     root = Path(root).absolute()
     output = root / "full-corpus-package"
-    _require(not output.exists() and not has_linked_ancestor(root), "full-corpus output exists")
+    _require(not has_linked_ancestor(root), "full-corpus root path contains a link")
+    _require(not output.exists(), "full-corpus output exists")
     staging = root / f".full-corpus-package.tmp-{uuid.uuid4().hex}"
     staging.mkdir()
     try:
