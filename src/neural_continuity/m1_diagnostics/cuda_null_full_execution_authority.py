@@ -152,6 +152,8 @@ def _paths(spec: dict[str, Any]) -> dict[str, Path]:
 
 def verify_full_corpus_execution_authority(
     external_sha256: str,
+    *,
+    resume: bool = False,
 ) -> FullCorpusExecutionAuthority:
     """Reverify every frozen prerequisite before any ONNX graph may be loaded."""
     spec = _read_spec(external_sha256)
@@ -212,8 +214,17 @@ def verify_full_corpus_execution_authority(
         and checkpoint.parent == evidence_parent,
         "full-corpus storage paths differ from the frozen D-drive evidence root",
     )
-    _require(not output.exists(), "fresh full-corpus output root already exists")
-    _require(not checkpoint.exists(), "external checkpoint tip already exists")
+    if resume:
+        _require(
+            output.is_dir()
+            and checkpoint.is_file()
+            and not has_linked_ancestor(output)
+            and not has_linked_ancestor(checkpoint),
+            "declared full-corpus run is unavailable for resume",
+        )
+    else:
+        _require(not output.exists(), "fresh full-corpus output root already exists")
+        _require(not checkpoint.exists(), "external checkpoint tip already exists")
     _require(scratch.is_dir() and not scratch.is_symlink(), "declared scratch root is unavailable")
     raw_minimum_free = compression.get("minimum_free_bytes_before_execution")
     _require(
