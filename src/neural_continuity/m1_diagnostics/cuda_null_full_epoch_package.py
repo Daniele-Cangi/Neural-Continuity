@@ -37,7 +37,7 @@ _TOP_LEVEL = {
     "within-epoch-comparisons.json",
     "replay-bundle.json",
 }
-_PAIRS = (
+COMPARISON_PAIRS = (
     ("repeated_inference", "batch_16_primary", "batch_16_repeat"),
     ("batch_size_variation", "batch_1_primary", "batch_16_primary"),
     ("batch_size_variation", "batch_1_primary", "batch_64_primary"),
@@ -207,11 +207,11 @@ def replay_full_epoch_package(
         )
         comparisons = _read_json(package / "within-epoch-comparisons.json")
         _require(
-            isinstance(comparisons, list) and len(comparisons) == len(_PAIRS),
+            isinstance(comparisons, list) and len(comparisons) == len(COMPARISON_PAIRS),
             "comparison set differs",
         )
         replayed: list[dict[str, Any]] = []
-        for item, (family, left, right) in zip(comparisons, _PAIRS, strict=True):
+        for item, (family, left, right) in zip(comparisons, COMPARISON_PAIRS, strict=True):
             _require(
                 isinstance(item, dict)
                 and set(item) == {"family", "comparison"}
