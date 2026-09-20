@@ -80,16 +80,37 @@ def test_attempt_intent_is_durable_before_child_and_completion_replays(
         calls += 1
         if result["next_epoch"] == 2:
             result["next_epoch"] = 121
+            result["completed_epoch_manifests"] = {epoch: MANIFEST for epoch in range(1, 121)}
         return result
 
     monkeypatch.setattr(runner, "verify_attempt_journal", bounded_verify)
+    monkeypatch.setattr(
+        runner,
+        "_finalize_or_replay_corpus",
+        lambda *_args: (
+            MANIFEST,
+            {
+                "family_unit_counts": {
+                    "repeated_inference": 120,
+                    "batch_size_variation": 120,
+                    "process_restart_variation": 60,
+                }
+            },
+        ),
+    )
     monkeypatch.setattr(
         runner,
         "verify_full_corpus_execution_authority",
         lambda *_args, **_kwargs: authority,
     )
     result = runner.run_full_corpus(AUTHORITY, resume=True)
-    assert result["status"] == "FULL_CORPUS_EPOCH_CAPTURE_COMPLETE_AGGREGATION_PENDING"
+    assert result["status"] == "CAPTURED_NOT_DECIDED"
+    assert result["artifact_manifest_sha256"] == MANIFEST
+    assert result["family_unit_counts"] == {
+        "repeated_inference": 120,
+        "batch_size_variation": 120,
+        "process_restart_variation": 60,
+    }
     assert calls >= 2
     final_tip = runner._read_tip(checkpoint, AUTHORITY)
     state = original_verify(
