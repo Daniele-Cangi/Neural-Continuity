@@ -73,9 +73,11 @@ def test_attempt_intent_is_durable_before_child_and_completion_replays(
     monkeypatch.setattr(runner, "_published_manifest", lambda *_args: MANIFEST)
     original_verify = runner.verify_attempt_journal
     calls = 0
+    verify_modes: list[bool] = []
 
     def bounded_verify(*args, **kwargs):
         nonlocal calls
+        verify_modes.append(kwargs.get("package_verifier") is verifier)
         result = original_verify(*args, **kwargs)
         calls += 1
         if result["next_epoch"] == 2:
@@ -112,6 +114,7 @@ def test_attempt_intent_is_durable_before_child_and_completion_replays(
         "process_restart_variation": 60,
     }
     assert calls >= 2
+    assert verify_modes == [True, False]
     final_tip = runner._read_tip(checkpoint, AUTHORITY)
     state = original_verify(
         journal,

@@ -208,8 +208,10 @@ def append_attempt_event(
 ) -> str:
     """Atomically append one event after checking its external chain anchor.
 
-    The returned SHA-256 is the new external tip. Persist it outside the journal
-    before any further event or resume. A stale lock or partial temp file blocks.
+    The existing chain is hash-verified; only a newly completed epoch is package-
+    replayed here. A resume must separately replay every completed package.
+    Persist the returned SHA-256 outside the journal before any further event or
+    resume. A stale lock or partial temp file blocks.
     """
     _require(isinstance(event, dict), "journal event must be an object")
     _root_check(root)
@@ -224,7 +226,6 @@ def append_attempt_event(
             root,
             external_tip_sha256=external_tip_sha256,
             authority_sha256=authority_sha256,
-            package_verifier=package_verifier,
         )
         if event.get("kind") == "epoch_completed":
             verifier = package_verifier

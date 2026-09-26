@@ -426,7 +426,6 @@ def run_full_corpus(authority_sha256: str, *, resume: bool) -> dict[str, Any]:
             journal,
             external_tip_sha256=tip,
             authority_sha256=authority_sha256,
-            package_verifier=package_verifier,
         )
 
     while state["next_epoch"] <= 120:
@@ -502,7 +501,6 @@ def run_full_corpus(authority_sha256: str, *, resume: bool) -> dict[str, Any]:
             journal,
             external_tip_sha256=tip,
             authority_sha256=authority_sha256,
-            package_verifier=package_verifier,
         )
     completed = state["completed_epoch_manifests"]
     if set(completed) != set(range(1, 121)):
