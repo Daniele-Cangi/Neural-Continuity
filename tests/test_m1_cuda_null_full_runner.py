@@ -212,3 +212,62 @@ def test_resume_recovers_fsynced_checkpoint_before_external_tip(
     assert recovered_tip == new_tip
     assert runner._read_tip(checkpoint, AUTHORITY) == new_tip
     assert state["open_attempt"] == (1, 1)
+
+
+def test_run_stops_on_requested_completed_epoch_before_starting_another(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    authority = _authority(tmp_path)
+    root, checkpoint, _tip = runner._initialize(authority)
+
+    def verifier(epoch: int, manifest: str) -> bool:
+        return epoch == 1 and manifest == MANIFEST
+
+    monkeypatch.setattr(runner, "_package_verifier", lambda *_args: verifier)
+    monkeypatch.setattr(
+        runner,
+        "verify_full_corpus_execution_authority",
+        lambda *_args, **_kwargs: authority,
+    )
+    monkeypatch.setattr(
+        runner,
+        "_run_child",
+        lambda _authority, epoch, attempt, process, _predecessor: SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "epoch_number": epoch,
+                    "attempt_number": attempt,
+                    "process_instance_id": process,
+                    "manifest_sha256": MANIFEST,
+                }
+            ),
+            stderr="",
+        ),
+    )
+    monkeypatch.setattr(runner, "_published_manifest", lambda *_args: MANIFEST)
+    monkeypatch.setattr(
+        runner,
+        "_finalize_or_replay_corpus",
+        lambda *_args: pytest.fail("bounded capture must not finalize the corpus"),
+    )
+
+    result = runner.run_full_corpus(
+        AUTHORITY,
+        resume=True,
+        stop_after_epoch=1,
+    )
+
+    assert result == {
+        "status": "CHECKPOINTED_NOT_FINALIZED",
+        "checkpoint_tip_sha256": runner._read_tip(checkpoint, AUTHORITY),
+        "completed_epoch_count": 1,
+        "completed_through_epoch": 1,
+    }
+    state = verify_attempt_journal(
+        root / "attempt-journal",
+        external_tip_sha256=result["checkpoint_tip_sha256"],
+        authority_sha256=AUTHORITY,
+    )
+    assert state["next_epoch"] == 2
+    assert state["open_attempt"] is None

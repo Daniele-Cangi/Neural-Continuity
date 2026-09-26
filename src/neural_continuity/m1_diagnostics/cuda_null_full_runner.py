@@ -368,7 +368,16 @@ def _run_child(
     )
 
 
-def run_full_corpus(authority_sha256: str, *, resume: bool) -> dict[str, Any]:
+def run_full_corpus(
+    authority_sha256: str,
+    *,
+    resume: bool,
+    stop_after_epoch: int | None = None,
+) -> dict[str, Any]:
+    if stop_after_epoch is not None and (
+        type(stop_after_epoch) is not int or not 1 <= stop_after_epoch <= 120
+    ):
+        raise FullCorpusExecutionBlocked("stop-after-epoch must be between 1 and 120")
     authority = verify_full_corpus_execution_authority(authority_sha256, resume=resume)
     root, checkpoint, tip = _resume(authority) if resume else _initialize(authority)
     journal = root / "attempt-journal"
@@ -428,7 +437,8 @@ def run_full_corpus(authority_sha256: str, *, resume: bool) -> dict[str, Any]:
             authority_sha256=authority_sha256,
         )
 
-    while state["next_epoch"] <= 120:
+    epoch_limit = stop_after_epoch if stop_after_epoch is not None else 120
+    while state["next_epoch"] <= epoch_limit:
         epoch = state["next_epoch"]
         attempt = state["next_attempt"]
         process_instance_id = str(uuid.uuid4())
@@ -502,6 +512,14 @@ def run_full_corpus(authority_sha256: str, *, resume: bool) -> dict[str, Any]:
             external_tip_sha256=tip,
             authority_sha256=authority_sha256,
         )
+    if stop_after_epoch is not None and state["next_epoch"] > stop_after_epoch:
+        completed = state["completed_epoch_manifests"]
+        return {
+            "status": "CHECKPOINTED_NOT_FINALIZED",
+            "checkpoint_tip_sha256": tip,
+            "completed_epoch_count": len(completed),
+            "completed_through_epoch": max(completed),
+        }
     completed = state["completed_epoch_manifests"]
     if set(completed) != set(range(1, 121)):
         raise FullCorpusExecutionBlocked("complete epoch manifest coverage differs")
@@ -532,6 +550,7 @@ def main() -> int:
     parser.add_argument("--attempt", type=int)
     parser.add_argument("--process-instance-id")
     parser.add_argument("--previous-completed-manifest-sha256")
+    parser.add_argument("--stop-after-epoch", type=int)
     args = parser.parse_args()
     if args.mode in {"run", "resume"}:
         if any(
@@ -544,7 +563,11 @@ def main() -> int:
             )
         ):
             parser.error("run and resume accept only the authority SHA-256")
-        result = run_full_corpus(args.authority_sha256, resume=args.mode == "resume")
+        result = run_full_corpus(
+            args.authority_sha256,
+            resume=args.mode == "resume",
+            stop_after_epoch=args.stop_after_epoch,
+        )
     else:
         if args.epoch is None or args.attempt is None or args.process_instance_id is None:
             parser.error("capture-one requires epoch, attempt, and process identity")
