@@ -20,6 +20,7 @@ from neural_continuity.m1_diagnostics.cuda_null_full_extrema import (
     batch_epoch_unit,
     single_comparison_unit,
 )
+from neural_continuity.m1_diagnostics.cuda_null_full_progress import report_progress
 from neural_continuity.m1_diagnostics.cuda_null_paths import (
     has_linked_ancestor,
     snapshot_file_inventory,
@@ -76,8 +77,11 @@ def _recompute(
     root: Path,
     authority_sha256: str,
     epoch_manifests: list[dict[str, Any]],
+    *,
+    phase: str = "corpus_aggregation",
 ) -> dict[str, Any]:
     _require(len(epoch_manifests) == _EPOCHS, "epoch manifest coverage incomplete")
+    report_progress(phase, "started")
     repeated_units: list[dict[str, Any]] = []
     batch_units: list[dict[str, Any]] = []
     restart_units: list[dict[str, Any]] = []
@@ -85,6 +89,7 @@ def _recompute(
     canonical_identity: tuple[Any, Any, Any] | None = None
 
     for epoch, declaration in enumerate(epoch_manifests, start=1):
+        report_progress(phase, "epoch_started", epoch=epoch)
         _require(
             isinstance(declaration, dict)
             and declaration.get("epoch") == epoch
@@ -173,8 +178,10 @@ def _recompute(
             prior = None
         else:
             prior = current
+        report_progress(phase, "epoch_completed", epoch=epoch)
 
     _require(prior is None, "restart pair coverage incomplete")
+    report_progress(phase, "completed")
     units = {
         "repeated_inference": repeated_units,
         "batch_size_variation": batch_units,
@@ -261,7 +268,9 @@ def replay_full_corpus_package(
             and summary.get("scientific_decision") == "NOT_EVALUATED",
             "full-corpus summary scope differs",
         )
-        recomputed = _recompute(root, authority_sha256, summary["epoch_manifests"])
+        recomputed = _recompute(
+            root, authority_sha256, summary["epoch_manifests"], phase="corpus_replay"
+        )
         _require(
             summary.get("units") == recomputed["units"]
             and summary.get("family_extrema") == recomputed["family_extrema"],
@@ -287,17 +296,83 @@ def replay_full_corpus_package(
         }
 
 
+def _publish_verified_staging(
+    staging: Path,
+    output: Path,
+    authority_sha256: str,
+    final_checkpoint_tip_sha256: str,
+) -> tuple[Path, str, dict[str, Any]]:
+    digest = sha256_file(staging / "artifact-manifest.json")
+    replayed = replay_full_corpus_package(
+        staging / "replay-bundle.json",
+        digest,
+        authority_sha256,
+        final_checkpoint_tip_sha256,
+    )
+    _require(
+        replayed.get("replay_status") == "PASS",
+        f"new full-corpus package blocked: {replayed.get('reason', 'unknown reason')}",
+    )
+    manifest = _read_json(staging / "artifact-manifest.json")
+    staging.replace(output)
+    # Atomic publication preserves the verified bytes; check their hashes rather
+    # than repeating the expensive model-free computation of all 120 epochs.
+    _require(
+        snapshot_file_inventory(output) == _FILES
+        and sha256_file(output / "artifact-manifest.json") == digest
+        and all(
+            (output / item["path"]).stat().st_size == item["size_bytes"]
+            and sha256_file(output / item["path"]) == item["sha256"]
+            for item in manifest["artifacts"]
+        ),
+        "published full-corpus package bytes differ",
+    )
+    report_progress("corpus_publication", "completed")
+    return output, digest, replayed
+
+
 def finalize_full_corpus_package(
     root: Path,
     authority_sha256: str,
     final_checkpoint_tip_sha256: str,
     epoch_manifests: list[dict[str, Any]],
-) -> tuple[Path, str]:
-    """Build, replay, and atomically publish the complete corpus package."""
+) -> tuple[Path, str, dict[str, Any]]:
+    """Build or recover staging, replay it, and atomically publish verified bytes."""
     root = Path(root).absolute()
     output = root / "full-corpus-package"
     _require(not has_linked_ancestor(root), "full-corpus root path contains a link")
     _require(not output.exists(), "full-corpus output exists")
+    _require(
+        len(epoch_manifests) == _EPOCHS
+        and all(
+            isinstance(item, dict)
+            and item.get("epoch") == epoch
+            and _is_sha256(item.get("manifest_sha256"))
+            for epoch, item in enumerate(epoch_manifests, start=1)
+        ),
+        "epoch manifest coverage differs",
+    )
+    pending = list(root.glob(".full-corpus-package.tmp-*"))
+    _require(len(pending) <= 1, "multiple interrupted full-corpus staging packages")
+    if pending:
+        staging = pending[0]
+        _require(
+            staging.is_dir() and not has_linked_ancestor(staging),
+            "interrupted full-corpus staging path invalid",
+        )
+        summary = _read_json(staging / "corpus-summary.json")
+        _require(
+            isinstance(summary, dict)
+            and summary.get("authority_sha256") == authority_sha256
+            and summary.get("final_checkpoint_tip_sha256") == final_checkpoint_tip_sha256
+            and summary.get("epoch_manifests") == epoch_manifests,
+            "interrupted full-corpus staging identity differs",
+        )
+        report_progress("corpus_staging_recovery", "started")
+        # Existing staging is retained on failure; never silently reconcile it.
+        return _publish_verified_staging(
+            staging, output, authority_sha256, final_checkpoint_tip_sha256
+        )
     staging = root / f".full-corpus-package.tmp-{uuid.uuid4().hex}"
     staging.mkdir()
     try:
@@ -340,16 +415,9 @@ def finalize_full_corpus_package(
             ],
         }
         (staging / "artifact-manifest.json").write_bytes(canonical_json_bytes(manifest) + b"\n")
-        digest = sha256_file(staging / "artifact-manifest.json")
-        replayed = replay_full_corpus_package(
-            staging / "replay-bundle.json",
-            digest,
-            authority_sha256,
-            final_checkpoint_tip_sha256,
+        return _publish_verified_staging(
+            staging, output, authority_sha256, final_checkpoint_tip_sha256
         )
-        _require(replayed.get("replay_status") == "PASS", "new full-corpus package blocked")
-        staging.replace(output)
-        return output, digest
     except Exception:
         if staging.exists() and staging.parent == root:
             shutil.rmtree(staging)
