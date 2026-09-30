@@ -1,0 +1,61 @@
+{
+  "kind": "m1_cuda_detection_limit_authority",
+  "version": "1.0.0",
+  "status": "FROZEN",
+  "scientific_decision": "NOT_EVALUATED",
+  "stage1_release_authorized": false,
+  "scope": {
+    "phase_id": "full_corpus_qualification",
+    "source_only": true,
+    "candidate_or_int8_execution_used": false,
+    "holdout_accessed": false,
+    "operational_tolerances_modified": false,
+    "m1_a_or_m1_b_decisions_modified": false,
+    "claim": "Empirical source-only CUDA measurement-noise detection envelope for the exact run authority below."
+  },
+  "frozen_inputs": {
+    "run_authority_sha256": "8a474cd6dbce76515f99715368da4ad873b3e576c8cd106c1b98d3be958392ea",
+    "external_final_manifest_sha256": "024e69d7cc55be0e25b8cc3da95775279fad5cbd827cd102672632e4fabfe7ed",
+    "artifact_manifest_sha256": "0e935bacfe9c5ffdce1aeeae47fe78379202c9e2f8965169277ada715ee0fb29",
+    "corpus_summary_sha256": "8f97e8e3dce75c44edb3ee9de45576c28328c52b6356e5f64e69754149e6b4ea",
+    "replay_bundle_sha256": "d30b75883f29ab4e6b04bf0d1aa7f91e54032cc3ed65489bfe9c29454690a1bd",
+    "final_checkpoint_tip_sha256": "aa2fd2e8a86ad9a4e6d6c9f86d60d7afeca16902676c98489b2b616249b6b347"
+  },
+  "estimator": {
+    "independent_unit": "One completed, independently launched full-corpus epoch as defined by the frozen run authority.",
+    "upper_detection_limit": "Exact observed maximum for the scalar metric in the family's frozen extrema summary.",
+    "lower_detection_limit": "Exact observed minimum for the scalar metric in the family's frozen extrema summary.",
+    "percentile_interpolation": false,
+    "target_upper_quantile": 0.95,
+    "target_lower_quantile": 0.05,
+    "minimum_marginal_confidence": 0.95,
+    "order_statistic_confidence_formula": "1 - 0.95 ** independent_unit_count",
+    "claim_scope": "Marginal per scalar metric within each comparison family; no simultaneous coverage claim across metrics or families.",
+    "ninety_ninth_percentile_claim": false
+  },
+  "families": [
+    {
+      "family": "repeated_inference",
+      "independent_unit_count": 120,
+      "frozen_summary_json_pointer": "/family_extrema/repeated_inference"
+    },
+    {
+      "family": "batch_size_variation",
+      "independent_unit_count": 120,
+      "frozen_summary_json_pointer": "/family_extrema/batch_size_variation"
+    },
+    {
+      "family": "process_restart_variation",
+      "independent_unit_count": 60,
+      "frozen_summary_json_pointer": "/family_extrema/process_restart_variation"
+    }
+  ],
+  "interpretation": {
+    "within_or_at_limit": "The difference is not distinguishable from the measured source-only null envelope at this resolution; this is not equivalence and does not imply PASS.",
+    "beyond_limit": "The difference exceeds the measured source-only null envelope for that metric and family; this alone does not imply scientific FAIL.",
+    "does_not_set_operational_tolerance": true,
+    "does_not_change_decision_contract": true,
+    "does_not_authorize_stage1_release": true,
+    "scope_is_limited_to_frozen_inputs": true
+  }
+}
