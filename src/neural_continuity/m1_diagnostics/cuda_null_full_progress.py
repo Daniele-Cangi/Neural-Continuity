@@ -57,7 +57,7 @@ def _warn(reason: str) -> None:
 
 def _emit(record: dict[str, Any]) -> None:
     # Losing the terminal must not interrupt evidence verification.
-    with suppress(OSError):
+    with suppress(OSError, ValueError):
         print(json.dumps(record, sort_keys=True), file=sys.stderr, flush=True)
 
 

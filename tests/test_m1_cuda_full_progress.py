@@ -91,15 +91,16 @@ def test_journal_reports_coverage_without_extrapolating_phase_eta(tmp_path: Path
     assert json.loads(path.read_text())["state"] == "interrupted"
 
 
+@pytest.mark.parametrize("error", [OSError, ValueError])
 def test_closed_terminal_does_not_stop_snapshot_updates(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: type[Exception]
 ) -> None:
     class ClosedTerminal:
         def write(self, text: str) -> None:
-            raise OSError("terminal closed")
+            raise error("terminal closed")
 
         def flush(self) -> None:
-            raise OSError("terminal closed")
+            raise error("terminal closed")
 
     path = tmp_path / "progress.json"
     progress.configure_progress(path)
