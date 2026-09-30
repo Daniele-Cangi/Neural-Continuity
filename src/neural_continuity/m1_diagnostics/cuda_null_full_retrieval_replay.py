@@ -51,7 +51,7 @@ def _validate_inputs(
     for query_id in query_ids:
         relevant = qrels[query_id]
         _require(
-            isinstance(relevant, (list, tuple))
+            isinstance(relevant, list | tuple)
             and bool(relevant)
             and len(set(relevant)) == len(relevant)
             and all(isinstance(item, str) and item in available for item in relevant),

@@ -33,6 +33,10 @@ from neural_continuity.m1_diagnostics.cuda_null_full_execution_authority import 
     FullCorpusExecutionBlocked,
     verify_full_corpus_execution_authority,
 )
+from neural_continuity.m1_diagnostics.cuda_null_full_progress import (
+    configure_progress,
+    report_progress,
+)
 from neural_continuity.m1_diagnostics.cuda_null_paths import has_linked_ancestor
 
 PackageVerifier = Callable[[int, str], bool]
@@ -89,12 +93,17 @@ def _read_tip(path: Path, authority_sha256: str) -> str:
 
 def _package_verifier(root: Path, authority_sha256: str) -> PackageVerifier:
     def verify(epoch: int, manifest_sha256: str) -> bool:
+        report_progress("journal_epoch_replay", "epoch_started", epoch=epoch)
         replay = replay_full_epoch_package(
             root / f"epoch-{epoch:04d}" / "replay-bundle.json",
             manifest_sha256,
             authority_sha256,
         )
-        return replay.get("replay_status") == "PASS" and replay.get("epoch_number") == epoch
+        passed = replay.get("replay_status") == "PASS" and replay.get("epoch_number") == epoch
+        report_progress(
+            "journal_epoch_replay", "epoch_completed" if passed else "blocked", epoch=epoch
+        )
+        return passed
 
     return verify
 
@@ -295,19 +304,19 @@ def _finalize_or_replay_corpus(
             raise FullCorpusExecutionBlocked(
                 "existing full-corpus manifest cannot be read"
             ) from exc
+        replay = replay_full_corpus_package(
+            package / "replay-bundle.json",
+            manifest_sha256,
+            authority_sha256,
+            final_checkpoint_tip_sha256,
+        )
     else:
-        package, manifest_sha256 = finalize_full_corpus_package(
+        package, manifest_sha256, replay = finalize_full_corpus_package(
             root,
             authority_sha256,
             final_checkpoint_tip_sha256,
             declarations,
         )
-    replay = replay_full_corpus_package(
-        package / "replay-bundle.json",
-        manifest_sha256,
-        authority_sha256,
-        final_checkpoint_tip_sha256,
-    )
     if replay.get("replay_status") != "PASS":
         raise FullCorpusExecutionBlocked(
             f"complete full-corpus replay blocked: {replay.get('reason', 'unknown reason')}"
@@ -331,6 +340,7 @@ def _finalize_or_replay_corpus(
             raise FullCorpusExecutionBlocked("external final anchor differs")
     else:
         _write_json_atomic(final_anchor, expected_anchor)
+    report_progress("final_anchor", "completed")
     return manifest_sha256, replay
 
 
@@ -368,11 +378,27 @@ def _run_child(
     )
 
 
-def run_full_corpus(authority_sha256: str, *, resume: bool) -> dict[str, Any]:
+def run_full_corpus(
+    authority_sha256: str,
+    *,
+    resume: bool,
+    stop_after_epoch: int | None = None,
+) -> dict[str, Any]:
+    if stop_after_epoch is not None and (
+        type(stop_after_epoch) is not int or not 1 <= stop_after_epoch <= 120
+    ):
+        raise FullCorpusExecutionBlocked("stop-after-epoch must be between 1 and 120")
+    configure_progress()
+    report_progress("authority_verification", "started")
     authority = verify_full_corpus_execution_authority(authority_sha256, resume=resume)
+    report_progress("authority_verification", "completed")
+    output_root = authority.paths["output_root"]
+    configure_progress(output_root.with_name(f"{output_root.name}.progress.json"), reset=False)
+    report_progress("controller", "resuming" if resume else "starting")
     root, checkpoint, tip = _resume(authority) if resume else _initialize(authority)
     journal = root / "attempt-journal"
     package_verifier = _package_verifier(root, authority_sha256)
+    report_progress("journal_verification", "started")
     state, tip = _verify_or_recover_journal(
         journal,
         checkpoint,
@@ -380,6 +406,7 @@ def run_full_corpus(authority_sha256: str, *, resume: bool) -> dict[str, Any]:
         authority_sha256,
         package_verifier,
     )
+    report_progress("journal_verification", "completed")
     if state["open_attempt"] is not None:
         epoch, attempt = state["open_attempt"]
         process_instance_id = _open_attempt_process(journal, state)
@@ -426,10 +453,10 @@ def run_full_corpus(authority_sha256: str, *, resume: bool) -> dict[str, Any]:
             journal,
             external_tip_sha256=tip,
             authority_sha256=authority_sha256,
-            package_verifier=package_verifier,
         )
 
-    while state["next_epoch"] <= 120:
+    epoch_limit = stop_after_epoch if stop_after_epoch is not None else 120
+    while state["next_epoch"] <= epoch_limit:
         epoch = state["next_epoch"]
         attempt = state["next_attempt"]
         process_instance_id = str(uuid.uuid4())
@@ -502,8 +529,16 @@ def run_full_corpus(authority_sha256: str, *, resume: bool) -> dict[str, Any]:
             journal,
             external_tip_sha256=tip,
             authority_sha256=authority_sha256,
-            package_verifier=package_verifier,
         )
+    if stop_after_epoch is not None and state["next_epoch"] > stop_after_epoch:
+        completed = state["completed_epoch_manifests"]
+        report_progress("controller", "checkpointed")
+        return {
+            "status": "CHECKPOINTED_NOT_FINALIZED",
+            "checkpoint_tip_sha256": tip,
+            "completed_epoch_count": len(completed),
+            "completed_through_epoch": max(completed),
+        }
     completed = state["completed_epoch_manifests"]
     if set(completed) != set(range(1, 121)):
         raise FullCorpusExecutionBlocked("complete epoch manifest coverage differs")
@@ -534,6 +569,7 @@ def main() -> int:
     parser.add_argument("--attempt", type=int)
     parser.add_argument("--process-instance-id")
     parser.add_argument("--previous-completed-manifest-sha256")
+    parser.add_argument("--stop-after-epoch", type=int)
     args = parser.parse_args()
     if args.mode in {"run", "resume"}:
         if any(
@@ -546,7 +582,17 @@ def main() -> int:
             )
         ):
             parser.error("run and resume accept only the authority SHA-256")
-        result = run_full_corpus(args.authority_sha256, resume=args.mode == "resume")
+        try:
+            result = run_full_corpus(
+                args.authority_sha256,
+                resume=args.mode == "resume",
+                stop_after_epoch=args.stop_after_epoch,
+            )
+        except (Exception, KeyboardInterrupt) as exc:
+            report_progress(
+                "controller", "interrupted" if isinstance(exc, KeyboardInterrupt) else "error"
+            )
+            raise
     else:
         if args.epoch is None or args.attempt is None or args.process_instance_id is None:
             parser.error("capture-one requires epoch, attempt, and process identity")

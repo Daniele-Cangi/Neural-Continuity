@@ -143,3 +143,45 @@ def test_declared_completed_package_failure_blocks_replay(tmp_path: Path) -> Non
             authority_sha256=AUTHORITY,
             package_verifier=lambda _epoch, _manifest: False,
         )
+
+
+def test_append_replays_only_new_completion_and_resume_replays_all(tmp_path: Path) -> None:
+    root = tmp_path / "attempt-journal"
+    manifests = {1: MANIFEST, 2: "d" * 64}
+    replayed: list[int] = []
+
+    def verifier(epoch: int, manifest: str) -> bool:
+        replayed.append(epoch)
+        return manifests.get(epoch) == manifest
+
+    tip = _append(root, AUTHORITY, _start(1, 1), verifier=verifier)
+    assert replayed == []
+    tip = _append(
+        root,
+        tip,
+        {"kind": "epoch_completed", "epoch": 1, "attempt": 1, "package_manifest_sha256": MANIFEST},
+        verifier=verifier,
+    )
+    assert replayed == [1]
+    tip = _append(root, tip, _start(2, 1), verifier=verifier)
+    assert replayed == [1]
+    tip = _append(
+        root,
+        tip,
+        {
+            "kind": "epoch_completed",
+            "epoch": 2,
+            "attempt": 1,
+            "package_manifest_sha256": manifests[2],
+        },
+        verifier=verifier,
+    )
+    assert replayed == [1, 2]
+    verified = verify_attempt_journal(
+        root,
+        external_tip_sha256=tip,
+        authority_sha256=AUTHORITY,
+        package_verifier=verifier,
+    )
+    assert verified["completed_packages_replayed"] is True
+    assert replayed == [1, 2, 1, 2]

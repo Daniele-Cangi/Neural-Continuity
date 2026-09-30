@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -27,7 +28,7 @@ def _comparison(left: str, right: str) -> dict[str, object]:
 
 
 def test_recompute_builds_all_preregistered_units(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     repeated = _comparison("batch_16_primary", "batch_16_repeat")
     batches = [
@@ -80,6 +81,13 @@ def test_recompute_builds_all_preregistered_units(
         "process_restart_variation": 60,
     }
     assert result["units"]["process_restart_variation"][-1]["unit_number"] == 60
+    progress = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
+    assert progress[0]["event"] == "started"
+    assert progress[-1]["event"] == "completed"
+    assert [item["epoch"] for item in progress if item["event"] == "epoch_completed"] == list(
+        range(1, 121)
+    )
+    assert all(item["phase"] == "corpus_aggregation" for item in progress)
 
 
 def test_recompute_rejects_incomplete_epoch_coverage(tmp_path: Path) -> None:

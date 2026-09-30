@@ -280,10 +280,12 @@ It produces evidence-bounded continuity decisions. It does **not** certify unive
 | FP32 canonical repeat | `BLOCKED` | Rankings are stable; numerical drift exceeds the frozen repeated-inference envelope. |
 | INT8 canonical repeat | `BLOCKED` | Embedding and ranking drift exceed the frozen repeated-inference envelope. |
 | Runtime provenance | `INCONCLUSIVE` | The frozen batch-size envelope does not cover canonical baseline variation. |
-| Measurement-null extension | `SENTINEL COMPLETE` | The preregistered 120/120 sentinel is replay-verified; qualifying full-corpus execution has not started. |
-| Sentinel executor | `COMPLETE 120/120` | Checkpoints 1-120 are replay-verified; technical-only, non-qualifying, and full-corpus execution remains unavailable. |
-| CUDA null qualification | `DRAFT; NOT AUTHORIZED` | [Separate source-only protocol](docs/M1_CUDA_NULL_QUALIFICATION_PROTOCOL.md); no CUDA null epoch or full-corpus execution has started. |
+| Measurement-null extension | `SENTINEL COMPLETE` | The preregistered 120/120 sentinel is replay-verified; technical-only evidence. |
+| Sentinel executor | `COMPLETE 120/120` | Checkpoints 1-120 are replay-verified; no scientific release follows from this technical gate. |
+| CUDA null qualification | `CAPTURED 120/120; FINALIZATION PENDING` | [Source-only protocol](docs/M1_CUDA_NULL_QUALIFICATION_PROTOCOL.md); all full-corpus epochs are captured, while final corpus replay and its external anchor remain pending. |
 | Stage 1 | `NOT STARTED` | The fail-closed gate holds; Transition B remains `FAIL`. |
 
 Stage 0, runtime-provenance, and measurement-null-plan replay are model-free and verified. No threshold or frozen evidence was changed.
+
+Full-corpus finalization reports completed epochs, percentage, elapsed time, and an estimated remaining time for the current corpus phase. An operational `<evidence-root>.progress.json` snapshot beside the evidence directory records the latest phase, timestamp, and process ID. Matching interrupted staging can be recovered; publication and the final anchor require complete model-free replay to pass.
 <!-- /m1-stage0-status -->
