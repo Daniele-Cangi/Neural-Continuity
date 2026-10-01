@@ -8,7 +8,11 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from neural_continuity.evidence import canonical_json_bytes, sha256_file
+from neural_continuity.evidence import (
+    canonical_json_bytes,
+    sha256_file,
+    sha256_lf_normalized_file,
+)
 from neural_continuity.m1_b.decision_policy import decide_transition_b
 from neural_continuity.m1_b.pure_comparison import compare_paired_observations
 from neural_continuity.m1_teacher_evidence import (
@@ -31,7 +35,8 @@ def _contracts(
     contract_b = _load_json(b_path, "TRANSITION_B_CONTRACT_INVALID")
     contract_a = _load_json(a_path, "TRANSITION_A_CONTRACT_INVALID")
     b_sha = sha256_file(b_path)
-    a_sha = sha256_file(a_path)
+    # Transition B pins A's normalized contract content, not checkout bytes.
+    a_sha = sha256_lf_normalized_file(a_path)
     inheritance = _require_mapping(contract_b.get("tolerance_inheritance"), "tolerance_inheritance")
     if (
         contract_b.get("contract_id") != "m1-transition-b-v1"

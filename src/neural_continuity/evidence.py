@@ -32,6 +32,12 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def sha256_lf_normalized_file(path: Path) -> str:
+    """Hash text authority content independently of checkout line endings."""
+    normalized = path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return hashlib.sha256(normalized).hexdigest()
+
+
 def build_environment_manifest() -> dict[str, Any]:
     deps = [
         "numpy",

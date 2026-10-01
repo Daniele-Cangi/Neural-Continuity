@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, cast
 
+from neural_continuity.evidence import sha256_lf_normalized_file as _sha256_lf_normalized_file
+
 AuthorityRole = Literal[
     "onnx_fp32_source",
     "onnx_int8_candidate",
@@ -149,11 +151,6 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def _sha256_lf_normalized_file(path: Path) -> str:
-    normalized = path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
-    return hashlib.sha256(normalized).hexdigest()
 
 
 def verify_frozen_authority_set(paths: FrozenAuthorityPaths) -> VerifiedAuthoritySet:
