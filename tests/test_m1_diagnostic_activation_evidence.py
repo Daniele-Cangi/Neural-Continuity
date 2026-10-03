@@ -11,6 +11,12 @@ from neural_continuity.m1_diagnostics.activation_evidence import (
     replay_activation_capture,
     write_activation_batch,
 )
+from neural_continuity.m1_diagnostics.activation_inputs import (
+    INPUT_CAPTURE_VERSION,
+    load_token_input_batch,
+    snapshot_token_inputs,
+    verify_token_inputs_unchanged,
+)
 from neural_continuity.m1_diagnostics.fidelity_authority import FidelityGateError
 
 
@@ -32,13 +38,16 @@ def _plan() -> dict[str, object]:
     }
 
 
-def _capture(output: Path) -> dict[str, object]:
+def _capture(output: Path, record_inputs: bool = False) -> dict[str, object]:
     build_root = output.parent / f".{output.name}.building"
     build_root.mkdir()
     (build_root / "target-integer-capture.onnx").write_bytes(b"derived-graph")
+    plan = _plan()
+    if record_inputs:
+        plan["input_capture_version"] = INPUT_CAPTURE_VERSION
     prepare_capture_package(
         build_root,
-        _plan(),
+        plan,
         {
             "status": "PASS",
             "derivative_final_output_fidelity": "PASS",
@@ -60,6 +69,7 @@ def _capture(output: Path) -> dict[str, object]:
             np.asarray(2, dtype=np.int64),
         ],
         [np.asarray([[0, 255], [4, 5]], dtype=np.uint8)],
+        token_inputs=_inputs() if record_inputs else None,
     )
     return finalize_activation_package(
         build_root,
@@ -105,6 +115,65 @@ def test_activation_pair_shape_mismatch_fails_closed(tmp_path: Path) -> None:
         )
     assert error.value.code == "PAIRED_ACTIVATION_SHAPE_MISMATCH"
     assert error.value.status == "BLOCKED"
+
+
+def _inputs() -> dict[str, np.ndarray]:
+    return {
+        "input_ids": np.asarray([[7, 8], [9, 0]], dtype=np.int64),
+        "attention_mask": np.asarray([[1, 1], [1, 0]], dtype=np.int64),
+        "token_type_ids": np.zeros((2, 2), dtype=np.int64),
+    }
+
+
+def test_actual_input_capture_is_deterministic_and_replayable(tmp_path: Path) -> None:
+    first = _capture(tmp_path / "inputs-first", record_inputs=True)
+    second = _capture(tmp_path / "inputs-second", record_inputs=True)
+    assert first["artifact_manifest_sha256"] == second["artifact_manifest_sha256"]
+    replay = replay_activation_capture(
+        tmp_path / "inputs-first" / "replay-bundle.json",
+        str(first["artifact_manifest_sha256"]),
+    )
+    assert replay["replay_verified"] is True
+    assert replay["model_execution_used"] is False
+
+
+@pytest.mark.parametrize("damage", ["missing", "tampered"])
+def test_declared_input_artifact_fails_closed(tmp_path: Path, damage: str) -> None:
+    result = _capture(tmp_path / "inputs", record_inputs=True)
+    path = tmp_path / "inputs" / "batch-0001-inputs.npz"
+    if damage == "missing":
+        path.unlink()
+    else:
+        path.write_bytes(b"changed")
+    with pytest.raises(FidelityGateError) as error:
+        replay_activation_capture(
+            path.parent / "replay-bundle.json", str(result["artifact_manifest_sha256"])
+        )
+    assert error.value.status == "BLOCKED"
+
+
+def test_missing_declared_inputs_block_even_without_manifest_replay(tmp_path: Path) -> None:
+    with pytest.raises(FidelityGateError) as error:
+        load_token_input_batch(tmp_path, {"query_ids": ["q-001"]})
+    assert error.value.code == "CAPTURE_INPUT_MISSING"
+
+
+def test_shared_input_mutation_is_detected() -> None:
+    inputs = _inputs()
+    snapshot = snapshot_token_inputs(inputs, 2)
+    inputs["attention_mask"][0, 0] = 0
+    with pytest.raises(FidelityGateError) as error:
+        verify_token_inputs_unchanged(inputs, snapshot)
+    assert error.value.code == "CAPTURE_INPUT_MUTATED"
+
+
+@pytest.mark.parametrize("mask", [[[1, 2], [1, 0]], [[0, 0], [1, 0]]])
+def test_invalid_capture_mask_blocks(mask: list[list[int]]) -> None:
+    inputs = _inputs()
+    inputs["attention_mask"] = np.asarray(mask, dtype=np.int64)
+    with pytest.raises(FidelityGateError) as error:
+        snapshot_token_inputs(inputs, 2)
+    assert error.value.code == "CAPTURE_INPUT_INVALID"
 
 
 def test_activation_replay_fails_closed_for_missing_batch(tmp_path: Path) -> None:

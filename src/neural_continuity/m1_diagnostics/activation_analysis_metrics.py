@@ -225,6 +225,68 @@ def _pearson(pairs: Sequence[tuple[float, float]]) -> float | None:
     return float(np.sum(left * right, dtype=np.float64) / denominator)
 
 
+def verified_activation_batch_paths(
+    root: Path,
+    batch_index: Mapping[str, Any],
+) -> tuple[tuple[Path, Path, Mapping[str, Any]], ...]:
+    """Return the declared capture batches in the existing canonical file order."""
+    batch_records = batch_index.get("batches")
+    if not isinstance(batch_records, list) or any(
+        not isinstance(record, Mapping) for record in batch_records
+    ):
+        raise ActivationAnalysisError(
+            "ACTIVATION_BATCH_INDEX_INVALID", "activation batch records are missing"
+        )
+    floating_files = sorted(root.glob("batch-*-floating.npz"))
+    integer_files = sorted(root.glob("batch-*-integer.npz"))
+    if len(floating_files) != len(batch_records) or len(integer_files) != len(batch_records):
+        raise ActivationAnalysisError(
+            "ACTIVATION_BATCH_SET_INCOMPLETE", "activation batch files are incomplete"
+        )
+    return tuple(zip(floating_files, integer_files, batch_records, strict=True))
+
+
+def validate_activation_batch(
+    floating: Any,
+    integer: Any,
+    floating_path: Path,
+    integer_path: Path,
+    batch_record: Mapping[str, Any],
+    probe_ids: Sequence[str],
+    integer_ids: Sequence[str],
+) -> list[str]:
+    """Check archived tensor keys, file identities and per-batch query identities."""
+    expected_floating_keys = {"query_ids"}
+    for probe_id in probe_ids:
+        expected_floating_keys.add(_array_key("source", probe_id))
+        expected_floating_keys.add(_array_key("target", probe_id))
+    expected_integer_keys = {"query_ids"} | {
+        _array_key("target_integer", probe_id) for probe_id in integer_ids
+    }
+    if set(floating.files) != expected_floating_keys:
+        raise ActivationAnalysisError(
+            "FLOATING_BATCH_SCHEMA_MISMATCH", f"floating batch schema differs: {floating_path.name}"
+        )
+    if set(integer.files) != expected_integer_keys:
+        raise ActivationAnalysisError(
+            "INTEGER_BATCH_SCHEMA_MISMATCH", f"integer batch schema differs: {integer_path.name}"
+        )
+    floating_queries = _query_ids(floating, floating_path.name)
+    integer_queries = _query_ids(integer, integer_path.name)
+    expected_queries = [str(value) for value in batch_record.get("query_ids", [])]
+    if (
+        floating_path.name != batch_record.get("floating_path")
+        or integer_path.name != batch_record.get("integer_path")
+        or floating_queries != integer_queries
+        or floating_queries != expected_queries
+    ):
+        raise ActivationAnalysisError(
+            "BATCH_QUERY_IDENTITY_MISMATCH",
+            f"batch files or query identities differ: {floating_path.name}",
+        )
+    return floating_queries
+
+
 def analyze_activation_batches(
     root: Path,
     capture_plan: Mapping[str, Any],
@@ -233,62 +295,29 @@ def analyze_activation_batches(
 ) -> dict[str, Any]:
     probe_mappings = capture_plan["probe_mappings"]
     integer_mappings = capture_plan["integer_mappings"]
-    batch_records = batch_index.get("batches")
-    if not isinstance(batch_records, list):
-        raise ActivationAnalysisError(
-            "ACTIVATION_BATCH_INDEX_INVALID", "activation batch records are missing"
-        )
-    floating_files = sorted(root.glob("batch-*-floating.npz"))
-    integer_files = sorted(root.glob("batch-*-integer.npz"))
-    expected_batches = len(batch_records)
-    if len(floating_files) != expected_batches or len(integer_files) != expected_batches:
-        raise ActivationAnalysisError(
-            "ACTIVATION_BATCH_SET_INCOMPLETE",
-            "activation batch files are incomplete",
-        )
+    batch_paths = verified_activation_batch_paths(root, batch_index)
+    expected_batches = len(batch_paths)
     probe_ids = [str(mapping["probe_id"]) for mapping in probe_mappings]
     integer_ids = [str(mapping["probe_id"]) for mapping in integer_mappings]
     floating_accumulators = {probe_id: FloatingAccumulator() for probe_id in probe_ids}
     integer_accumulators = {probe_id: IntegerAccumulator() for probe_id in integer_ids}
     observed_queries: list[str] = []
-    expected_floating_keys = {"query_ids"}
-    for probe_id in probe_ids:
-        expected_floating_keys.add(_array_key("source", probe_id))
-        expected_floating_keys.add(_array_key("target", probe_id))
-    expected_integer_keys = {"query_ids"} | {
-        _array_key("target_integer", probe_id) for probe_id in integer_ids
-    }
-
     for batch_number, (floating_path, integer_path, batch_record) in enumerate(
-        zip(floating_files, integer_files, batch_records, strict=True), start=1
+        batch_paths, start=1
     ):
         with (
             np.load(floating_path, allow_pickle=False) as floating,
             np.load(integer_path, allow_pickle=False) as integer,
         ):
-            if set(floating.files) != expected_floating_keys:
-                raise ActivationAnalysisError(
-                    "FLOATING_BATCH_SCHEMA_MISMATCH",
-                    f"floating batch schema differs: {floating_path.name}",
-                )
-            if set(integer.files) != expected_integer_keys:
-                raise ActivationAnalysisError(
-                    "INTEGER_BATCH_SCHEMA_MISMATCH",
-                    f"integer batch schema differs: {integer_path.name}",
-                )
-            floating_queries = _query_ids(floating, floating_path.name)
-            integer_queries = _query_ids(integer, integer_path.name)
-            expected_queries = [str(value) for value in batch_record.get("query_ids", [])]
-            if (
-                floating_path.name != batch_record.get("floating_path")
-                or integer_path.name != batch_record.get("integer_path")
-                or floating_queries != integer_queries
-                or floating_queries != expected_queries
-            ):
-                raise ActivationAnalysisError(
-                    "BATCH_QUERY_IDENTITY_MISMATCH",
-                    f"batch files or query identities differ: {floating_path.name}",
-                )
+            floating_queries = validate_activation_batch(
+                floating,
+                integer,
+                floating_path,
+                integer_path,
+                batch_record,
+                probe_ids,
+                integer_ids,
+            )
             observed_queries.extend(floating_queries)
             for probe_id in probe_ids:
                 floating_accumulators[probe_id].update(

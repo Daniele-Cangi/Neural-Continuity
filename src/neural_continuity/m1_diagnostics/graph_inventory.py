@@ -15,24 +15,40 @@ from neural_continuity.m1_diagnostics.authority import (
 GraphRole = Literal["onnx_fp32_source", "onnx_int8_candidate"]
 
 _QUANTIZATION_OPS = frozenset(
-    {"QuantizeLinear", "DequantizeLinear", "QLinearMatMul", "MatMulInteger", "ConvInteger"}
+    {
+        "QuantizeLinear",
+        "DequantizeLinear",
+        "QLinearMatMul",
+        "QLinearConv",
+        "MatMulInteger",
+        "ConvInteger",
+    }
 )
 _NORMALIZATION_OPS = frozenset(
-    {"BatchNormalization", "GroupNormalization", "InstanceNormalization", "LayerNormalization"}
-)
-_ATTENTION_COMPUTE_OPS = frozenset(
-    {"Attention", "MultiHeadAttention", "MatMul", "MatMulInteger", "QLinearMatMul", "Softmax"}
-)
-_OUTPUT_AGGREGATION_OPS = frozenset(
     {
-        "Add",
-        "Clip",
-        "Div",
+        "BatchNormalization",
+        "InstanceNormalization",
         "LayerNormalization",
         "LpNormalization",
-        "Mul",
+    }
+)
+_ATTENTION_COMPUTE_OPS = frozenset(
+    {
+        "Attention",
+        "MultiHeadAttention",
+        "MatMul",
+        "MatMulInteger",
+        "QLinearMatMul",
+        "Gemm",
+    }
+)
+_OUTPUT_PATH_REDUCTIONS = frozenset(
+    {
         "ReduceMean",
         "ReduceSum",
+        "ReduceMax",
+        "GlobalAveragePool",
+        "GlobalMaxPool",
     }
 )
 _FAMILY_ORDER = (
@@ -40,7 +56,7 @@ _FAMILY_ORDER = (
     "QUANTIZED_COMPUTE",
     "NORMALIZATION",
     "ATTENTION_OR_MATMUL",
-    "OUTPUT_AGGREGATION",
+    "OUTPUT_PATH",
     "FINAL_OUTPUT",
 )
 
@@ -97,6 +113,8 @@ class GraphInventory:
     initializer_count: int
     op_counts: tuple[tuple[str, int], ...]
     nodes: tuple[NodeInventory, ...]
+    structural_rules: tuple[dict[str, object], ...] = ()
+    value_info: tuple[TensorInventory, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -111,6 +129,8 @@ class GraphInventory:
             "node_count": len(self.nodes),
             "op_counts": {op_type: count for op_type, count in self.op_counts},
             "nodes": [node.to_dict() for node in self.nodes],
+            "structural_rules": [dict(rule) for rule in self.structural_rules],
+            "value_info": [value.to_dict() for value in self.value_info],
             "inventory_basis": "structural_onnx_dag",
             "model_execution_used": False,
         }
@@ -185,9 +205,22 @@ def build_graph_inventory(graph: LoadedOnnxGraph) -> GraphInventory:
 
     import onnx
 
+    from .normalization_patterns import find_structural_normalizations
+
     nodes = list(graph.model.graph.node)
     output_names = {str(value.name) for value in graph.model.graph.output}
     output_ancestors = _output_ancestors(nodes, output_names)
+    structural_rules = find_structural_normalizations(
+        nodes,
+        {str(value.name) for value in graph.model.graph.initializer},
+    )
+    structural_norm_indices: set[int] = set()
+    for rule in structural_rules:
+        boundary_index = rule["boundary_node_index"]
+        if isinstance(boundary_index, bool) or not isinstance(boundary_index, int):
+            raise ValueError("Structural normalization boundary must be an integer node index")
+        structural_norm_indices.add(boundary_index)
+    output_path_indices = _output_path_indices(nodes, output_ancestors, structural_norm_indices)
     producer_op_by_tensor = {
         str(output): str(node.op_type) for node in nodes for output in node.output if output
     }
@@ -217,10 +250,12 @@ def build_graph_inventory(graph: LoadedOnnxGraph) -> GraphInventory:
             families.add("QUANTIZED_COMPUTE")
         if op_type in _NORMALIZATION_OPS:
             families.add("NORMALIZATION")
+        if index in structural_norm_indices:
+            families.add("NORMALIZATION")
         if op_type in _ATTENTION_COMPUTE_OPS:
             families.add("ATTENTION_OR_MATMUL")
-        if index in output_ancestors and op_type in _OUTPUT_AGGREGATION_OPS:
-            families.add("OUTPUT_AGGREGATION")
+        if index in output_path_indices:
+            families.add("OUTPUT_PATH")
         if any(value in output_names for value in outputs):
             families.add("FINAL_OUTPUT")
         inventory_nodes.append(
@@ -249,4 +284,96 @@ def build_graph_inventory(graph: LoadedOnnxGraph) -> GraphInventory:
         initializer_count=len(graph.model.graph.initializer),
         op_counts=tuple(sorted(op_counts.items())),
         nodes=tuple(inventory_nodes),
+        structural_rules=tuple(structural_rules),
+        value_info=tuple(_tensor_inventory(value, onnx) for value in graph.model.graph.value_info),
     )
+
+
+def _output_path_indices(
+    nodes: list[Any],
+    output_ancestors: set[int],
+    structural_norm_indices: set[int] | None = None,
+) -> set[int]:
+    """Label reductions on the final-output path and their nearest input norms."""
+    producer_by_tensor = {
+        str(output): index for index, node in enumerate(nodes) for output in node.output if output
+    }
+    consumers_by_node: dict[int, set[int]] = defaultdict(set)
+    for consumer_index, node in enumerate(nodes):
+        for value in node.input:
+            producer_index = producer_by_tensor.get(str(value))
+            if producer_index is not None:
+                consumers_by_node[producer_index].add(consumer_index)
+
+    reduction_indices = {
+        index for index in output_ancestors if str(nodes[index].op_type) in _OUTPUT_PATH_REDUCTIONS
+    }
+    if not reduction_indices:
+        return set()
+
+    has_reduction_free_path: dict[int, bool] = {}
+    first_reductions: set[int] = set()
+    for index, node in enumerate(nodes):
+        clean_input_path = False
+        for value in node.input:
+            tensor_name = str(value)
+            if not tensor_name:
+                continue
+            producer_index = producer_by_tensor.get(tensor_name)
+            if (
+                producer_index is None
+                or has_reduction_free_path.get(producer_index, False)
+                and (str(nodes[producer_index].op_type) not in _OUTPUT_PATH_REDUCTIONS)
+            ):
+                clean_input_path = True
+        has_reduction_free_path[index] = clean_input_path
+        if index in reduction_indices and clean_input_path:
+            first_reductions.add(index)
+
+    if not first_reductions:
+        from neural_continuity.m1_diagnostics.authority import DiagnosticPreflightError
+
+        raise DiagnosticPreflightError(
+            status="BLOCKED",
+            code="OUTPUT_PATH_REDUCTION_LINEAGE_INVALID",
+            message="Output reduction ancestry has no topological first reduction",
+        )
+
+    output_path: set[int] = set()
+    pending = list(sorted(first_reductions))
+    while pending:
+        index = pending.pop()
+        if index in output_path or index not in output_ancestors:
+            continue
+        output_path.add(index)
+        pending.extend(sorted(consumers_by_node.get(index, ()), reverse=True))
+
+    normalizations = {
+        index for index, node in enumerate(nodes) if str(node.op_type) in _NORMALIZATION_OPS
+    }
+    normalizations.update(structural_norm_indices or ())
+    attention_barriers = _ATTENTION_COMPUTE_OPS
+    for reduction_index in first_reductions:
+        backward = [
+            producer_by_tensor[str(value)]
+            for value in nodes[reduction_index].input
+            if str(value) in producer_by_tensor
+        ]
+        visited: set[int] = set()
+        while backward:
+            index = backward.pop()
+            if index in visited:
+                continue
+            visited.add(index)
+            op_type = str(nodes[index].op_type)
+            if index in normalizations:
+                output_path.add(index)
+                continue
+            if op_type in attention_barriers:
+                continue
+            backward.extend(
+                producer_by_tensor[str(value)]
+                for value in nodes[index].input
+                if str(value) in producer_by_tensor
+            )
+    return output_path

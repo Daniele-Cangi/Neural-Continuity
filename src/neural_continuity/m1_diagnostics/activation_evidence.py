@@ -9,6 +9,11 @@ from typing import Any
 import numpy as np
 
 from neural_continuity.evidence import canonical_json_bytes, sha256_file
+from neural_continuity.m1_diagnostics.activation_inputs import (
+    INPUT_CAPTURE_VERSION,
+    load_token_input_batch,
+    write_token_input_batch,
+)
 from neural_continuity.m1_diagnostics.fidelity_authority import (
     FidelityGateError,
     verify_artifact_manifest,
@@ -16,6 +21,15 @@ from neural_continuity.m1_diagnostics.fidelity_authority import (
 from neural_continuity.m1_diagnostics.fidelity_evidence import _write_deterministic_npz
 
 ACTIVATION_FORMAT_VERSION = "1.0.0"
+
+
+def _capture_format(capture_plan: Mapping[str, Any]) -> str:
+    version = capture_plan.get("input_capture_version")
+    if version is None:
+        return ACTIVATION_FORMAT_VERSION
+    if version != INPUT_CAPTURE_VERSION:
+        raise FidelityGateError("CAPTURE_INPUT_POLICY_INVALID", "Unknown input capture version")
+    return INPUT_CAPTURE_VERSION
 
 
 def _write_json(path: Path, value: Mapping[str, Any]) -> None:
@@ -81,6 +95,8 @@ def write_activation_batch(
     source_values: Sequence[np.ndarray],
     target_values: Sequence[np.ndarray],
     integer_values: Sequence[np.ndarray],
+    *,
+    token_inputs: Mapping[str, np.ndarray] | None = None,
 ) -> dict[str, Any]:
     if (
         len(probe_mappings) != len(source_values)
@@ -129,7 +145,7 @@ def write_activation_batch(
     integer_path = build_root / f"{batch_id}-integer.npz"
     _write_deterministic_npz(floating_path, floating_arrays)
     _write_deterministic_npz(integer_path, integer_arrays)
-    return {
+    record: dict[str, Any] = {
         "batch_id": batch_id,
         "query_ids": list(query_ids),
         "floating_path": floating_path.name,
@@ -139,6 +155,9 @@ def write_activation_batch(
         "floating_size_bytes": floating_path.stat().st_size,
         "integer_size_bytes": integer_path.stat().st_size,
     }
+    if token_inputs is not None:
+        record.update(write_token_input_batch(build_root, batch_id, query_ids, token_inputs))
+    return record
 
 
 def _nonfinite_count(value: np.ndarray) -> int:
@@ -178,6 +197,7 @@ def summarize_activation_package(
     all_query_ids: list[str] = []
     total_floating_bytes = 0
     total_integer_bytes = 0
+    input_capture = _capture_format(capture_plan) == INPUT_CAPTURE_VERSION
 
     for mapping in probe_mappings:
         probe_id = mapping.get("probe_id")
@@ -217,6 +237,10 @@ def summarize_activation_package(
             raise FidelityGateError("BATCH_INDEX_INVALID", "batch identity is invalid")
         if any(not isinstance(query_id, str) for query_id in query_ids):
             raise FidelityGateError("BATCH_INDEX_INVALID", "batch query IDs are invalid")
+        if input_capture:
+            load_token_input_batch(root, batch)
+        elif any(key.startswith("inputs_") for key in batch):
+            raise FidelityGateError("CAPTURE_INPUT_POLICY_INVALID", "Undeclared input capture")
         floating_path = _safe_batch_path(root, batch.get("floating_path"))
         integer_path = _safe_batch_path(root, batch.get("integer_path"))
         if sha256_file(floating_path) != batch.get("floating_sha256") or sha256_file(
@@ -325,7 +349,7 @@ def summarize_activation_package(
         summary["target_dtypes"] = sorted(summary["target_dtypes"], key=str.encode)
         probes.append(summary)
     saturation = [integer_summary[mapping["probe_id"]] for mapping in integer_mappings]
-    return {
+    result: dict[str, Any] = {
         "batch_count": len(batches),
         "query_count": len(all_query_ids),
         "floating_probe_count": len(probe_mappings),
@@ -336,6 +360,9 @@ def summarize_activation_package(
         "probes": probes,
         "integer_saturation": saturation,
     }
+    if input_capture:
+        result["input_batches_verified"] = len(batches)
+    return result
 
 
 def finalize_activation_package(
@@ -373,7 +400,7 @@ def finalize_activation_package(
 
     replay_path = build_root / "replay-bundle.json"
     replay = {
-        "replay_format_version": ACTIVATION_FORMAT_VERSION,
+        "replay_format_version": _capture_format(capture_plan),
         "capture_plan_path": "capture-plan.json",
         "capture_preflight_path": "capture-preflight.json",
         "batch_index_path": batch_index_path.name,
@@ -429,11 +456,14 @@ def replay_activation_capture(
     manifest = verify_artifact_manifest(root, expected_manifest_sha256)
     bundle = _load_json(bundle_file, "REPLAY_BUNDLE_INVALID")
     if (
-        bundle.get("replay_format_version") != ACTIVATION_FORMAT_VERSION
+        bundle.get("replay_format_version")
+        not in (ACTIVATION_FORMAT_VERSION, INPUT_CAPTURE_VERSION)
         or bundle.get("replay_requires_model_execution") is not False
     ):
         raise FidelityGateError("REPLAY_POLICY_INVALID", "activation replay policy invalid")
     capture_plan = _load_json(root / "capture-plan.json", "CAPTURE_PLAN_INVALID")
+    if bundle.get("replay_format_version") != _capture_format(capture_plan):
+        raise FidelityGateError("REPLAY_POLICY_INVALID", "Input capture version mismatch")
     batch_index = _load_json(root / "batch-index.json", "BATCH_INDEX_INVALID")
     report = _load_json(root / "activation-report.json", "ACTIVATION_REPORT_INVALID")
     summary = summarize_activation_package(root, capture_plan, batch_index)

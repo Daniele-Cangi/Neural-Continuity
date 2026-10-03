@@ -15,10 +15,11 @@ _RELEVANT_FAMILIES = frozenset(
         "QUANTIZED_COMPUTE",
         "NORMALIZATION",
         "ATTENTION_OR_MATMUL",
-        "OUTPUT_AGGREGATION",
+        "OUTPUT_PATH",
         "FINAL_OUTPUT",
     }
 )
+_TRANSPARENT_OPS = frozenset({"QuantizeLinear", "DequantizeLinear"})
 
 
 @dataclass(frozen=True)
@@ -61,7 +62,7 @@ class ProbePlan:
             "version": 1,
             "source_graph_sha256": self.source_graph_sha256,
             "target_graph_sha256": self.target_graph_sha256,
-            "lineage_rule": "unique_exact_node_identity_and_operator",
+            "lineage_rule": "unique_joint_structural_fingerprint_v2",
             "selection_rule": "structural_family_membership",
             "probes": [probe.to_dict() for probe in self.probes],
             "model_execution_used": False,
@@ -81,56 +82,267 @@ class ProbePlan:
         return payload
 
 
-def _unique_identity_index(
-    nodes: tuple[NodeInventory, ...],
-) -> dict[tuple[str, str], NodeInventory]:
-    indexed: dict[tuple[str, str], NodeInventory] = {}
-    duplicates: list[dict[str, str]] = []
-    for node in nodes:
-        key = (node.name, node.op_type)
-        if not node.name:
-            continue
-        if key in indexed:
-            duplicates.append({"name": node.name, "op_type": node.op_type})
-        indexed[key] = node
-    if duplicates:
+def _semantic_op_type(op_type: str) -> str:
+    if op_type in {"MatMulInteger", "QLinearMatMul"}:
+        return "MatMul"
+    if op_type in {"ConvInteger", "QLinearConv"}:
+        return "Conv"
+    if op_type.startswith("QLinear"):
+        return op_type.removeprefix("QLinear")
+    return op_type
+
+
+def _semantic_input_slots(node: NodeInventory) -> tuple[tuple[int, int], ...]:
+    if node.op_type == "QLinearMatMul":
+        if len(node.inputs) < 4:
+            raise DiagnosticPreflightError(
+                status="BLOCKED",
+                code="QUANTIZED_OPERATOR_INPUTS_INVALID",
+                message="QLinearMatMul lacks its declared data inputs",
+            )
+        return ((0, 0), (1, 3))
+    if node.op_type == "QLinearConv":
+        if len(node.inputs) < 8:
+            raise DiagnosticPreflightError(
+                status="BLOCKED",
+                code="QUANTIZED_OPERATOR_INPUTS_INVALID",
+                message="QLinearConv lacks its declared data inputs",
+            )
+        slots = [(0, 0), (1, 3)]
+        if len(node.inputs) > 8 and node.inputs[8]:
+            slots.append((2, 8))
+        return tuple(slots)
+    if node.op_type == "MatMulInteger":
+        return ((0, 0), (1, 1))
+    if node.op_type == "ConvInteger":
+        return ((0, 0), (1, 1))
+    return tuple((position, position) for position, value in enumerate(node.inputs) if value)
+
+
+def _graph_structure(
+    inventory: GraphInventory,
+) -> tuple[
+    dict[int, NodeInventory],
+    dict[int, tuple[object, ...]],
+    dict[int, tuple[tuple[int, int | None, int | None, str, int | None], ...]],
+    dict[int, tuple[int, ...]],
+]:
+    nodes = {node.index: node for node in inventory.nodes if node.op_type not in _TRANSPARENT_OPS}
+    producers: dict[str, NodeInventory] = {}
+    for node in inventory.nodes:
+        for tensor in node.outputs:
+            if not tensor:
+                continue
+            if tensor in producers:
+                raise DiagnosticPreflightError(
+                    status="BLOCKED",
+                    code="GRAPH_TENSOR_PRODUCER_AMBIGUOUS",
+                    message="A graph tensor has more than one producer",
+                    details={"tensor": tensor},
+                )
+            producers[tensor] = node
+    graph_inputs = {tensor.name: position for position, tensor in enumerate(inventory.inputs)}
+
+    def trace(tensor: str) -> tuple[int | None, int | None, str, int | None]:
+        visited: set[str] = set()
+        while tensor in producers and producers[tensor].op_type in _TRANSPARENT_OPS:
+            if tensor in visited:
+                raise DiagnosticPreflightError(
+                    status="BLOCKED",
+                    code="QUANTIZATION_LINEAGE_CYCLE",
+                    message="Transparent quantization lineage contains a cycle",
+                )
+            visited.add(tensor)
+            wrapper = producers[tensor]
+            if not wrapper.inputs or not wrapper.inputs[0]:
+                raise DiagnosticPreflightError(
+                    status="BLOCKED",
+                    code="QUANTIZATION_LINEAGE_INPUT_MISSING",
+                    message="QuantizeLinear or DequantizeLinear has no data input",
+                )
+            tensor = wrapper.inputs[0]
+        producer = producers.get(tensor)
+        if producer is not None and producer.index in nodes:
+            return producer.index, producer.outputs.index(tensor), "node", None
+        if tensor in graph_inputs:
+            return None, None, "graph_input", graph_inputs[tensor]
+        return None, None, "static_input", None
+
+    input_refs: dict[int, tuple[tuple[int, int | None, int | None, str, int | None], ...]] = {}
+    base: dict[int, tuple[object, ...]] = {}
+    output_positions: dict[int, list[int]] = {index: [] for index in nodes}
+
+    for node in nodes.values():
+        refs: list[tuple[int, int | None, int | None, str, int | None]] = []
+        for semantic_position, raw_position in _semantic_input_slots(node):
+            producer_index, producer_output, boundary, boundary_position = trace(
+                node.inputs[raw_position]
+            )
+            refs.append(
+                (semantic_position, producer_index, producer_output, boundary, boundary_position)
+            )
+        input_refs[node.index] = tuple(refs)
+        boundaries = tuple(
+            (position, boundary, boundary_position)
+            for position, _, _, boundary, boundary_position in refs
+            if boundary != "node"
+        )
+        base[node.index] = (
+            _semantic_op_type(node.op_type),
+            node.domain,
+            len(refs),
+            len(node.outputs),
+            boundaries,
+        )
+
+    for output_position, graph_output in enumerate(inventory.outputs):
+        producer_index, producer_output, boundary, _ = trace(graph_output.name)
+        if producer_index is not None and producer_output is not None and boundary == "node":
+            output_positions[producer_index].append(output_position)
+
+    return (
+        nodes,
+        base,
+        input_refs,
+        {index: tuple(values) for index, values in output_positions.items()},
+    )
+
+
+def _joint_structural_colors(
+    source: GraphInventory, target: GraphInventory
+) -> tuple[dict[int, int], dict[int, int]]:
+    source_nodes, source_base, source_inputs, source_outputs = _graph_structure(source)
+    target_nodes, target_base, target_inputs, target_outputs = _graph_structure(target)
+    bases = {("source", index): value for index, value in source_base.items()}
+    bases.update({("target", index): value for index, value in target_base.items()})
+    colors_by_refinement: dict[tuple[str, int], int] = {}
+
+    def assign(signatures: dict[tuple[str, int], tuple[object, ...]]) -> dict[tuple[str, int], int]:
+        identifiers = {
+            signature: color
+            for color, signature in enumerate(sorted(set(signatures.values()), key=repr))
+        }
+        return {key: identifiers[signature] for key, signature in signatures.items()}
+
+    colors_by_refinement = assign(bases)
+    node_count = len(source_nodes) + len(target_nodes)
+    for _ in range(node_count + 1):
+        signatures: dict[tuple[str, int], tuple[object, ...]] = {}
+        for role, nodes, input_refs, output_positions in (
+            ("source", source_nodes, source_inputs, source_outputs),
+            ("target", target_nodes, target_inputs, target_outputs),
+        ):
+            for index in nodes:
+                incoming = tuple(
+                    (
+                        input_position,
+                        (
+                            colors_by_refinement[(role, producer_index)]
+                            if producer_index is not None
+                            else None
+                        ),
+                        producer_output,
+                        boundary,
+                        boundary_position,
+                    )
+                    for (
+                        input_position,
+                        producer_index,
+                        producer_output,
+                        boundary,
+                        boundary_position,
+                    ) in input_refs[index]
+                )
+                outgoing = tuple(
+                    sorted(
+                        (
+                            producer_output,
+                            consumer_position,
+                            colors_by_refinement[(role, consumer_index)],
+                        )
+                        for consumer_index, refs in input_refs.items()
+                        for (
+                            consumer_position,
+                            producer_index,
+                            producer_output,
+                            _boundary,
+                            _boundary_position,
+                        ) in refs
+                        if producer_index == index and producer_output is not None
+                    )
+                )
+                signatures[(role, index)] = (
+                    colors_by_refinement[(role, index)],
+                    bases[(role, index)],
+                    incoming,
+                    outgoing,
+                    output_positions[index],
+                )
+        refined = assign(signatures)
+        # Refinement only splits classes because the previous color is included.
+        if len(set(refined.values())) == len(set(colors_by_refinement.values())):
+            colors_by_refinement = refined
+            break
+        colors_by_refinement = refined
+    else:
         raise DiagnosticPreflightError(
             status="BLOCKED",
-            code="AMBIGUOUS_NODE_IDENTITY",
-            message="Graph contains duplicate node identity and operator pairs",
-            details={"duplicates": duplicates},
+            code="STRUCTURAL_FINGERPRINT_DID_NOT_CONVERGE",
+            message="Joint structural fingerprint refinement did not converge",
         )
-    return indexed
+
+    return (
+        {index: colors_by_refinement[("source", index)] for index in source_nodes},
+        {index: colors_by_refinement[("target", index)] for index in target_nodes},
+    )
 
 
 def _post_qdq_tensor(
     output_tensor: str,
     consumers: dict[str, list[NodeInventory]],
+    target_node: NodeInventory,
 ) -> tuple[str, str]:
+    direct = {
+        value
+        for node in consumers.get(output_tensor, [])
+        if node.op_type == "DequantizeLinear"
+        for value in node.outputs
+        if value
+    }
+    chains = set(direct)
     quantizers = [
         node for node in consumers.get(output_tensor, []) if node.op_type == "QuantizeLinear"
     ]
-    chains: list[str] = []
     for quantizer in quantizers:
         for quantized_output in quantizer.outputs:
             for dequantizer in consumers.get(quantized_output, []):
                 if dequantizer.op_type == "DequantizeLinear":
-                    chains.extend(value for value in dequantizer.outputs if value)
-    unique_chains = sorted(set(chains))
-    if len(unique_chains) > 1:
+                    chains.update(value for value in dequantizer.outputs if value)
+    if len(chains) > 1:
         raise DiagnosticPreflightError(
             status="BLOCKED",
             code="AMBIGUOUS_POST_QDQ_LINEAGE",
             message="A target output has multiple post-QDQ lineage candidates",
-            details={"target_output": output_tensor, "candidate_count": len(unique_chains)},
+            details={"target_output": output_tensor, "candidate_count": len(chains)},
         )
-    if unique_chains:
-        return unique_chains[0], "post_quantize_dequantize_output"
+    if direct:
+        return next(iter(direct)), "post_dequantize_output"
+    if chains:
+        return next(iter(chains)), "post_quantize_dequantize_output"
+    if target_node.op_type.startswith("QLinear") or target_node.op_type in {
+        "MatMulInteger",
+        "ConvInteger",
+    }:
+        raise DiagnosticPreflightError(
+            status="BLOCKED",
+            code="POST_QDQ_FLOAT_LINEAGE_MISSING",
+            message="A quantized compute output has no unique floating-point dequantized tensor",
+        )
     return output_tensor, "direct_compute_output"
 
 
 def build_probe_plan(source: GraphInventory, target: GraphInventory) -> ProbePlan:
-    """Build paired probes using uniform graph identity and adjacency rules."""
+    """Build paired probes from unique joint structural fingerprints."""
 
     if source.role != "onnx_fp32_source" or target.role != "onnx_int8_candidate":
         raise DiagnosticPreflightError(
@@ -153,50 +365,64 @@ def build_probe_plan(source: GraphInventory, target: GraphInventory) -> ProbePla
             message="Source and target graph output identities differ",
         )
 
-    source_index = _unique_identity_index(source.nodes)
-    target_index = _unique_identity_index(target.nodes)
+    source_nodes = {node.index: node for node in source.nodes}
+    target_nodes = {node.index: node for node in target.nodes}
+    source_colors, target_colors = _joint_structural_colors(source, target)
     consumers: dict[str, list[NodeInventory]] = defaultdict(list)
     for node in target.nodes:
         for node_input in node.inputs:
             if node_input:
                 consumers[node_input].append(node)
 
-    selected_keys = {
-        (node.name, node.op_type)
+    selected_colors = {
+        source_colors[node.index]
         for node in source.nodes
-        if node.name and _RELEVANT_FAMILIES.intersection(node.structural_families)
+        if _RELEVANT_FAMILIES.intersection(node.structural_families)
     }
-    selected_keys.update(
-        (node.name, node.op_type)
+    selected_colors.update(
+        target_colors[node.index]
         for node in target.nodes
-        if node.name and "QUANTIZED_COMPUTE" in node.structural_families
+        if _RELEVANT_FAMILIES.intersection(node.structural_families)
     )
+    source_by_color: dict[int, list[NodeInventory]] = defaultdict(list)
+    target_by_color: dict[int, list[NodeInventory]] = defaultdict(list)
+    for index, color in source_colors.items():
+        source_by_color[color].append(source_nodes[index])
+    for index, color in target_colors.items():
+        target_by_color[color].append(target_nodes[index])
 
-    missing = sorted(
-        key for key in selected_keys if key not in source_index or key not in target_index
-    )
-    if missing:
+    invalid = [
+        color
+        for color in selected_colors
+        if len(source_by_color.get(color, ())) != 1 or len(target_by_color.get(color, ())) != 1
+    ]
+    if invalid:
         raise DiagnosticPreflightError(
             status="BLOCKED",
             code="PROBE_LINEAGE_NOT_BIJECTIVE",
-            message="A structurally selected probe node has no unique source-target counterpart",
+            message="A selected structural class lacks a unique source-target counterpart",
             details={
-                "missing_count": len(missing),
-                "missing": [{"name": name, "op_type": op_type} for name, op_type in missing],
+                "invalid_class_count": len(invalid),
+                "classes": [
+                    {
+                        "source_count": len(source_by_color.get(color, ())),
+                        "target_count": len(target_by_color.get(color, ())),
+                    }
+                    for color in sorted(invalid)
+                ],
             },
         )
 
     pairs: list[ProbePair] = []
-    ordered_keys = sorted(selected_keys, key=lambda key: source_index[key].index)
-    for key in ordered_keys:
-        source_node = source_index[key]
-        target_node = target_index[key]
+    for color in sorted(selected_colors):
+        source_node = source_by_color[color][0]
+        target_node = target_by_color[color][0]
         if len(source_node.outputs) != len(target_node.outputs):
             raise DiagnosticPreflightError(
                 status="BLOCKED",
                 code="PROBE_OUTPUT_ARITY_MISMATCH",
                 message="Paired source-target nodes have different output arity",
-                details={"name": key[0], "op_type": key[1]},
+                details={"structural_class": color},
             )
         families = tuple(
             sorted(
@@ -213,9 +439,11 @@ def build_probe_plan(source: GraphInventory, target: GraphInventory) -> ProbePla
                     status="BLOCKED",
                     code="PROBE_OUTPUT_IDENTITY_MISSING",
                     message="A selected probe output is unnamed",
-                    details={"name": key[0], "op_type": key[1]},
+                    details={"structural_class": color},
                 )
-            target_probe_tensor, target_basis = _post_qdq_tensor(target_tensor, consumers)
+            target_probe_tensor, target_basis = _post_qdq_tensor(
+                target_tensor, consumers, target_node
+            )
             pairs.append(
                 ProbePair(
                     probe_id=f"probe-{len(pairs) + 1:04d}",

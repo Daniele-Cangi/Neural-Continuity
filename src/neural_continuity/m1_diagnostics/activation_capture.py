@@ -20,6 +20,11 @@ from neural_continuity.m1_diagnostics.activation_evidence import (
     prepare_capture_package,
     write_activation_batch,
 )
+from neural_continuity.m1_diagnostics.activation_inputs import (
+    INPUT_CAPTURE_VERSION,
+    snapshot_token_inputs,
+    verify_token_inputs_unchanged,
+)
 from neural_continuity.m1_diagnostics.fidelity_authority import FidelityGateError
 from neural_continuity.m1_diagnostics.fidelity_control import (
     BATCH_SIZE,
@@ -114,11 +119,13 @@ def _capture_plan(
     authority: VerifiedActivationAuthority,
     derived: Mapping[str, Any],
     query_ids: Sequence[str],
+    record_inputs: bool = False,
+    metric_layout_sha256: str | None = None,
 ) -> dict[str, Any]:
     query_identity_sha256 = hashlib.sha256(
         canonical_json_bytes({"query_ids": list(query_ids)})
     ).hexdigest()
-    return {
+    plan = {
         "kind": "m1_transition_b_v2_activation_capture_plan",
         "version": "1.0.0",
         "status": "FROZEN_BEFORE_CAPTURE",
@@ -162,6 +169,18 @@ def _capture_plan(
         "scientific_decision_recomputed": False,
         "frozen_transition_b_v1_scientific_decision": "FAIL",
     }
+    if record_inputs:
+        plan["version"] = INPUT_CAPTURE_VERSION
+        plan["input_capture_version"] = INPUT_CAPTURE_VERSION
+    if metric_layout_sha256 is not None:
+        if (
+            not record_inputs
+            or len(metric_layout_sha256) != 64
+            or any(char not in "0123456789abcdef" for char in metric_layout_sha256)
+        ):
+            raise FidelityGateError("CAPTURE_INPUT_POLICY_INVALID", "Layout binding is invalid")
+        plan["metric_layout_sha256"] = metric_layout_sha256
+    return plan
 
 
 def capture_activations(
@@ -171,6 +190,9 @@ def capture_activations(
     fidelity_directory: str | Path,
     output_directory: str | Path,
     progress: ProgressCallback | None = None,
+    *,
+    record_inputs: bool = False,
+    metric_layout_sha256: str | None = None,
 ) -> dict[str, Any]:
     output_path = Path(output_directory).resolve()
     if output_path.exists():
@@ -206,7 +228,9 @@ def capture_activations(
                 "DERIVATIVE_FIDELITY_BLOCKED",
                 "target integer-capture derivative changed final embeddings",
             )
-        capture_plan = _capture_plan(authority, derived, query_ids)
+        capture_plan = _capture_plan(
+            authority, derived, query_ids, record_inputs, metric_layout_sha256
+        )
         preflight = {
             "kind": "m1_transition_b_v2_activation_capture_preflight",
             "status": "PASS",
@@ -239,18 +263,25 @@ def capture_activations(
             batch_query_ids = query_ids[start : start + BATCH_SIZE]
             batch_query_texts = query_texts[start : start + BATCH_SIZE]
             inputs = _token_inputs(teacher, batch_query_texts)
+            input_snapshot = (
+                snapshot_token_inputs(inputs, len(batch_query_ids)) if record_inputs else None
+            )
             source_values = _run_requested(
                 source_session,
                 source_names,
                 inputs,
                 "source_floating",
             )
+            if input_snapshot is not None:
+                verify_token_inputs_unchanged(inputs, input_snapshot)
             target_all = _run_requested(
                 target_session,
                 target_names + integer_names,
                 inputs,
                 "target_floating_and_integer",
             )
+            if input_snapshot is not None:
+                verify_token_inputs_unchanged(inputs, input_snapshot)
             target_values = target_all[: len(target_names)]
             integer_values = target_all[len(target_names) :]
             batch_id = f"batch-{batch_number:04d}"
@@ -263,6 +294,7 @@ def capture_activations(
                 source_values,
                 target_values,
                 integer_values,
+                token_inputs=input_snapshot,
             )
             batch_records.append(record)
             if progress is not None:
