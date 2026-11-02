@@ -129,17 +129,13 @@ general network sandbox.
 
 ### Reproducing the CI checks locally
 
-On Windows, create and activate a virtual environment, then install the same
-dependencies used by CI:
-
+Use uv to install Python 3.12 and reproduce the exact dependency versions
+recorded in the project's lockfile:
 
 ```powershell
-py -3.12 -m venv .venv
+uv python install 3.12
+uv sync --locked --all-extras --python 3.12
 .\.venv\Scripts\Activate.ps1
-
-python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-python -m pip install "numpy>=1.26,<2.3"
-python -m pip install -e ".[test,dev,onnx,sentence-transformers]"
 ```
 
 Set the Hugging Face offline flags before running validation:
