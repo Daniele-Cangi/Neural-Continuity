@@ -102,7 +102,80 @@ mypy src
 python -m compileall -q src tests
 ```
 
-Some real-model or ONNX workflows require optional dependencies and locally preserved frozen artifacts. Absence of those inputs should fail or skip according to the relevant test/experiment contract; do not download or substitute qualifying artifacts implicitly.
+## Offline validation in CI
+
+The GitHub Actions workflow at
+`.github/workflows/offline-validation.yml` runs on pushes and pull requests.
+It uses Windows with Python 3.12, installs the project's declared
+`test`, `dev`, `onnx`, and `sentence-transformers` extras, and runs:
+
+- `pytest -q`
+- `ruff check .`
+- `python -m black --check --workers 1 -- src tests`
+- `python -m mypy src`
+- `python -m compileall -q src tests`
+
+The test suite exercises model-free validation and replay using repository-owned
+toy fixtures, synthetic inputs, and recorded evidence. Relevant checks cover
+authority and hash verification, graph inventory and probe planning,
+instrumentation and fidelity, deterministic metrics, serialization, and replay.
+
+During testing, the workflow sets `HF_HUB_OFFLINE=1`,
+`TRANSFORMERS_OFFLINE=1`, and `HF_DATASETS_OFFLINE=1`. The model snapshot
+retrieval path also uses `local_files_only=True`. Dependency installation
+still requires access to package indexes; these settings are intended to
+prevent model and dataset downloads during validation, not to provide a
+general network sandbox.
+
+### Reproducing the CI checks locally
+
+Use uv to install Python 3.12 and reproduce the exact dependency versions
+recorded in the project's lockfile:
+
+```powershell
+uv python install 3.12
+uv sync --locked --all-extras --python 3.12
+.\.venv\Scripts\Activate.ps1
+```
+
+Set the Hugging Face offline flags before running validation:
+
+```powershell
+$env:HF_HUB_OFFLINE = "1"
+$env:TRANSFORMERS_OFFLINE = "1"
+$env:HF_DATASETS_OFFLINE = "1"
+```
+
+Run the same checks used by CI:
+
+```powershell
+python -m pytest -q
+ruff check .
+python -m black --check --workers 1 -- src tests
+python -m mypy src
+python -m compileall -q src tests
+```
+
+### Scientific evidence boundary
+
+These checks validate software behavior and replay of synthetic or recorded
+evidence. They do not establish a scientific `PASS`, `FAIL`, or `INCONCLUSIVE`
+result.
+
+Ordinary offline CI must not execute the real frozen M1-B diagnostic, download
+frozen FP32 or INT8 models, regenerate evidence, or use protected research data
+for new execution.
+
+Required fixtures and dependencies for core offline replay tests must be
+available. Missing requirements should fail clearly rather than silently
+skipping core checks.
+
+Qualifying research execution remains separate from ordinary offline CI and
+must follow the frozen diagnostic protocol and its authority requirements.
+
+Some optional real-model or ONNX execution tests require additional dependencies and locally preserved frozen artifacts. A test may skip when those inputs are unavailable only if its specific test or experiment contract permits it.
+
+This does not apply to core offline replay tests, which must fail clearly when required fixtures or dependencies are missing. Do not download or substitute qualifying artifacts implicitly.
 
 ## Pull request notes
 
